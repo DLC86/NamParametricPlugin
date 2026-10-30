@@ -43,6 +43,7 @@ class NamParametricPluginAudioProcessorEditor final : public juce::AudioProcesso
   ModelBarComponent mModelBar;
   IrBarComponent mIrBar;
   juce::TextButton mAboutButton{"i"};
+  juce::TextButton mSettingsButton{"Settings"};
   AboutOverlayComponent mAboutOverlay;
 
   std::unique_ptr<juce::FileChooser> mModelChooser;

@@ -22,6 +22,9 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
     static constexpr const char* inputGainDb = "inputGainDb";
     static constexpr const char* outputGainDb = "outputGainDb";
     static constexpr const char* irEnabled = "irEnabled";
+    static constexpr const char* calibrateInput = "calibrateInput";
+    static constexpr const char* inputCalibration = "inputCalibration";
+    static constexpr const char* outputMode = "outputMode";
   };
 
   struct RuntimeParameterInfo {
@@ -66,6 +69,9 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
   juce::String GetStatusText() const;
   juce::String GetModelPath() const;
   bool HasModelLoaded() const;
+  bool SupportsModelSizeSelection() const;
+  namparametric::dsp::ModelSize GetModelSize() const;
+  void SetModelSize(namparametric::dsp::ModelSize size);
   std::vector<RuntimeParameterInfo> GetRuntimeParameters() const;
   void SetRuntimeParameterValue(size_t index, double value);
   std::optional<double> GetRuntimeParameterValue(size_t index) const;
@@ -114,6 +120,7 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
 
   struct AsyncLoadResult {
     bool success = false;
+    bool preserveRuntimeParameters = false;
     uint64_t requestId = 0;
     std::unique_ptr<ProcessingState> processingState;
     juce::String message;
@@ -126,6 +133,8 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
     juce::File modelFile;
     std::vector<RestoredRuntimeParameterValue> restoredValues;
     uint64_t requestId = 0;
+    namparametric::dsp::ModelSize size = namparametric::dsp::ModelSize::Full;
+    bool preserveRuntimeParameters = false;
   };
 
   struct IrLoadRequest {
@@ -149,7 +158,8 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
 
   juce::AudioProcessorValueTreeState::ParameterLayout CreateParameterLayout();
   void StartModelLoad(const juce::File& modelFile,
-                      std::vector<RestoredRuntimeParameterValue> restoredValues = {});
+                      std::vector<RestoredRuntimeParameterValue> restoredValues = {},
+                      bool preserveRuntimeParameters = false);
   void BeginModelLoadLocked(LoadRequest request);
   void CollectCompletedModelLoad();
   void ApplyRestoredValues(AsyncLoadResult& result);
@@ -177,6 +187,10 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
 
   juce::String mStatusText = "No model loaded";
   juce::String mModelPath;
+  juce::String mRequestedModelPath;
+  std::vector<RestoredRuntimeParameterValue> mRequestedRestoredValues;
+  namparametric::dsp::ModelSize mModelSize = namparametric::dsp::ModelSize::Full;
+  bool mSupportsModelSizeSelection = false;
   std::vector<RuntimeParameterInfo> mRuntimeParameters;
   std::shared_ptr<RuntimeParameterMailbox> mRuntimeParameterMailbox;
 
@@ -200,6 +214,9 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
   std::atomic<float>* mInputGainParam = nullptr;
   std::atomic<float>* mOutputGainParam = nullptr;
   std::atomic<float>* mIrEnabledParam = nullptr;
+  std::atomic<float>* mCalibrateInputParam = nullptr;
+  std::atomic<float>* mInputCalibrationParam = nullptr;
+  std::atomic<float>* mOutputModeParam = nullptr;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NamParametricPluginAudioProcessor)
 };

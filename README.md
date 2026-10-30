@@ -73,11 +73,20 @@ To use a model, download a `.nam` file and load it in the plugin (see [Usage Not
   - `Output Gain` (`-12 dB` to `+12 dB`)
 - Model load via file chooser (`.nam`).
 - Dynamic model parameters are generated in the plugin UI and applied at runtime.
+- `HyperA2` parametric files from the [DLC86 trainer](https://github.com/DLC86/neural-amp-modeler-parametric/tree/codex/parametric-a2)
+  load with **Full (8 channels) selected by default**, independently of the trainer's
+  playback preference. The model bar exposes **Full / Lite (3 channels)** for these files.
+  Changing size loads the replacement in the background and retains current knob values.
+  Sessions remember an explicitly selected Lite mode; older sessions default to Full.
+- **Settings** contains **Input calibration**, **Calibrate input** and **Output mode**,
+  using the same level conventions and gain equations as standard NAM. Details are in
+  [HyperA2 and level calibration](docs/HyperA2-and-calibration.md).
 - Dynamic model parameters are **not** exposed as host automation parameters in v1.
 - Plugin state persists:
   - APVTS state
   - `modelPath` (absolute path)
   - dynamic model parameter values by ordered index and name
+  - HyperA2 Full/Lite selection and level-calibration settings
 - Sample-rate mismatch between DAW and model is handled via AudioDSPTools resampling.
 
 ## Repository Layout

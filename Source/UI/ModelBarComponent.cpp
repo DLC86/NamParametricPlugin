@@ -21,8 +21,20 @@ ModelBarComponent::ModelBarComponent() {
   mClearButton.setColour(juce::TextButton::buttonColourId, nam::ui::Colours::track);
   mClearButton.setColour(juce::TextButton::textColourOffId, nam::ui::Colours::textSecondary);
   addAndMakeVisible(mClearButton);
+  mSizeSwitch.setOptions({"Full", "Lite"});
+  mSizeSwitch.setSelectedIndex(0, juce::dontSendNotification);
+  addChildComponent(mSizeSwitch);
 
   SetModelInfo(false, "No model loaded");
+}
+
+void ModelBarComponent::SetSizeSelection(bool available, bool full) {
+  const bool changed = mSizeSwitch.isVisible() != available;
+  mSizeSwitch.setVisible(available);
+  mSizeSwitch.setSelectedIndex(full ? 0 : 1, juce::dontSendNotification);
+  if (changed) {
+    resized();
+  }
 }
 
 void ModelBarComponent::SetModelInfo(const bool isLoaded, const juce::String& text) {
@@ -51,6 +63,10 @@ void ModelBarComponent::resized() {
   mClearButton.setBounds(bounds.removeFromRight(kClearButtonWidth)
                              .withSizeKeepingCentre(kClearButtonWidth, kClearButtonWidth));
   bounds.removeFromRight(6);
+  if (mSizeSwitch.isVisible()) {
+    mSizeSwitch.setBounds(bounds.removeFromRight(mSizeSwitch.getPreferredWidth()));
+    bounds.removeFromRight(10);
+  }
 
   mDotBounds =
       bounds.removeFromLeft(kDotDiameter).withSizeKeepingCentre(kDotDiameter, kDotDiameter);

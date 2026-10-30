@@ -10,6 +10,9 @@
 
 namespace namparametric::dsp {
 
+enum class ModelSize { Full, Lite };
+enum class OutputMode { Raw, Normalized, Calibrated, Auto };
+
 struct ModelParameterInfo {
   std::string name;
   float minValue = 0.0f;
@@ -25,7 +28,12 @@ class NamModelEngine {
   NamModelEngine();
   ~NamModelEngine();
 
-  bool LoadModel(const std::string& modelPath, std::string& errorMessage);
+  bool LoadModel(const std::string& modelPath, std::string& errorMessage,
+                 ModelSize size = ModelSize::Full);
+  [[nodiscard]] bool SupportsSizeSelection() const { return mSupportsSizeSelection; }
+  [[nodiscard]] ModelSize GetModelSize() const { return mModelSize; }
+  [[nodiscard]] double GetInputCalibrationGainDb(double interfaceLevel, bool enabled) const;
+  [[nodiscard]] double GetOutputCalibrationGainDb(double interfaceLevel, OutputMode mode) const;
 
   void Reset(double sampleRate, int maxBlockSize);
   void Process(float* input, float* output, int numSamples);
@@ -42,6 +50,9 @@ class NamModelEngine {
   [[nodiscard]] bool NeedToResample() const;
 
   std::unique_ptr<nam::DSP> mModel;
+  bool mSupportsSizeSelection = false;
+  ModelSize mModelSize = ModelSize::Full;
+  std::string mGearType;
   nam::IParametricControl* mParametricControl = nullptr;
   std::vector<ModelParameterInfo> mParameterInfos;
   std::vector<float> mParameterValues;
