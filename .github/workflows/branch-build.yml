@@ -16,7 +16,7 @@ jobs:
           - os: windows-latest
             preset: windows-release
             artifact: Windows-x64
-          - os: macos-14
+          - os: macos-15-intel
             preset: mac-release
             artifact: macOS
     runs-on: ${{ matrix.os }}
