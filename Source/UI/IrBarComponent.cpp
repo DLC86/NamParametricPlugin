@@ -9,7 +9,7 @@ constexpr int kClearButtonWidth = 22;
 constexpr int kEnabledSwitchWidth = 86;
 // Reserves room in the bottom-right corner of the window for the About
 // overlay trigger, which sits outside this component but shares its row.
-constexpr int kAboutButtonReserve = 44;
+constexpr int kAboutButtonReserve = 116;
 }  // namespace
 
 IrBarComponent::IrBarComponent() {

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "UI/CalibrationSettingsComponent.h"
 #include "UI/NamColours.h"
 
 namespace {
@@ -94,6 +95,8 @@ void NamParametricPluginAudioProcessorEditor::UpdateModelBarInfo() {
   const auto text =
       loaded ? juce::File(mProcessor.GetModelPath()).getFileName() : mProcessor.GetStatusText();
   mModelBar.SetModelInfo(loaded, text);
+  mModelBar.SetSizeSelection(mProcessor.SupportsModelSizeSelection(),
+                             mProcessor.GetModelSize() == namparametric::dsp::ModelSize::Full);
 }
 
 void NamParametricPluginAudioProcessorEditor::UpdateIrBarInfo() {
@@ -164,10 +167,20 @@ NamParametricPluginAudioProcessorEditor::NamParametricPluginAudioProcessorEditor
   mAboutButton.setColour(juce::TextButton::textColourOffId, nam::ui::Colours::textSecondary);
   mAboutButton.onClick = [this]() { mAboutOverlay.Show(); };
   addAndMakeVisible(mAboutButton);
+  addAndMakeVisible(mSettingsButton);
+  mSettingsButton.onClick = [this]() {
+    juce::CallOutBox::launchAsynchronously(
+        std::make_unique<CalibrationSettingsComponent>(mProcessor.mValueTree),
+        mSettingsButton.getBounds(), this);
+  };
   addChildComponent(mAboutOverlay);
 
   mModelBar.getSelectButton().onClick = [this]() { ShowModelChooser(); };
   mModelBar.getClearButton().onClick = [this]() { mProcessor.ClearModel(); };
+  mModelBar.getSizeSwitch().onChange = [this](int index) {
+    mProcessor.SetModelSize(index == 0 ? namparametric::dsp::ModelSize::Full
+                                       : namparametric::dsp::ModelSize::Lite);
+  };
 
   mIrBar.getSelectButton().onClick = [this]() { ShowIrChooser(); };
   mIrBar.getClearButton().onClick = [this]() { mProcessor.ClearIr(); };
@@ -222,6 +235,7 @@ void NamParametricPluginAudioProcessorEditor::resized() {
                          getHeight() - kAboutButtonSize - kAboutButtonMargin, kAboutButtonSize,
                          kAboutButtonSize);
   mAboutOverlay.setBounds(getLocalBounds());
+  mSettingsButton.setBounds(mAboutButton.getX() - 72, mAboutButton.getY(), 64, kAboutButtonSize);
 }
 
 void NamParametricPluginAudioProcessorEditor::timerCallback() {

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <numbers>
 #include <stdexcept>
@@ -19,11 +20,69 @@ inline constexpr double PI = std::numbers::pi_v<double>;
 
 #include "dsp/ResamplingContainer/ResamplingContainer.h"
 #include "get_dsp.h"
+#include "wavenet/a2_fast.h"
 
 namespace namparametric::dsp {
 
 namespace {
 constexpr double kAssumedUnknownModelSampleRate = 48000.0;
+
+size_t ReadCount(const nlohmann::json& entry, const char* key) {
+  const auto& value = entry.at(key);
+  if (!value.is_number_integer() || value < 0) {
+    throw std::runtime_error(std::string("HyperA2: invalid ") + key);
+  }
+  return value.get<size_t>();
+}
+
+// The trainer exports Lite then Full, each with the unchanged HyperWaveNet
+// layout. Select before constructing the DSP so only one audio network runs.
+nlohmann::json SelectHyperA2Branch(const nlohmann::json& model, ModelSize size) {
+  if (model.at("version") != "1.0.0") {
+    throw std::runtime_error("HyperA2: unsupported model version (expected 1.0.0).");
+  }
+  const auto& config = model.at("config");
+  const auto& weights = model.at("weights");
+  const auto& branches = config.at("submodels");
+  if (!weights.is_array() || !branches.is_array() || branches.size() != 2) {
+    throw std::runtime_error("HyperA2: expected Lite and Full submodels and a flat weights array.");
+  }
+  nam::parse_param_specs(config, "HyperA2");
+  size_t cursor = 0;
+  for (size_t index = 0; index < 2; ++index) {
+    const auto& branch = branches[index];
+    const auto& branchConfig = branch.at("config");
+    int channels = 0;
+    const size_t count = ReadCount(branch, "weight_count");
+    const size_t baseCount = ReadCount(branch, "base_weight_count");
+    if (branch.at("name") != (index == 0 ? "lite" : "full") ||
+        branch.at("architecture") != "HyperWaveNet" ||
+        branch.at("max_value") != (index == 0 ? 0.5 : 1.0) ||
+        branchConfig.at("params") != config.at("params") ||
+        !nam::wavenet::a2_fast::is_a2_shape(branchConfig, &channels) ||
+        channels != (index == 0 ? 3 : 8) || baseCount != (index == 0 ? 1871u : 12146u) ||
+        count <= baseCount || ReadCount(branch, "weight_offset") != cursor ||
+        cursor > weights.size() || count > weights.size() - cursor) {
+      throw std::runtime_error(
+          "HyperA2: inconsistent submodel topology, controls or weight layout.");
+    }
+    cursor += count;
+  }
+  if (cursor != weights.size()) {
+    throw std::runtime_error("HyperA2: weights contain unowned trailing values.");
+  }
+  const auto& selected = branches[size == ModelSize::Lite ? 0 : 1];
+  const size_t offset = ReadCount(selected, "weight_offset");
+  const size_t count = ReadCount(selected, "weight_count");
+  nlohmann::json child = model;
+  child["architecture"] = "HyperWaveNet";
+  child["config"] = selected.at("config");
+  child["weights"] = nlohmann::json::array();
+  for (size_t i = offset; i < offset + count; ++i) {
+    child["weights"].push_back(weights[i]);
+  }
+  return child;
+}
 }  // namespace
 
 struct NamModelEngine::ResamplerState {
@@ -36,11 +95,21 @@ struct NamModelEngine::ResamplerState {
 NamModelEngine::NamModelEngine() = default;
 NamModelEngine::~NamModelEngine() = default;
 
-bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorMessage) {
+bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorMessage,
+                               const ModelSize size) {
   errorMessage.clear();
 
   try {
-    auto loadedModel = nam::get_dsp(std::filesystem::path(modelPath));
+    std::ifstream stream{std::filesystem::path(modelPath)};
+    if (!stream) {
+      throw std::runtime_error("Could not open model file.");
+    }
+    auto config = nlohmann::json::parse(stream);
+    const bool supportsSizeSelection = config.at("architecture") == "HyperA2";
+    if (supportsSizeSelection) {
+      config = SelectHyperA2Branch(config, size);
+    }
+    auto loadedModel = nam::get_dsp(config);
     if (loadedModel == nullptr) {
       errorMessage = "Model loader returned null model.";
       return false;
@@ -76,7 +145,15 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
       }
     }
 
+    std::string gearType;
+    if (config.contains("metadata") && config["metadata"].is_object() &&
+        config["metadata"].contains("gear_type") && config["metadata"]["gear_type"].is_string()) {
+      gearType = config["metadata"]["gear_type"].get<std::string>();
+    }
     mModel = std::move(loadedModel);
+    mGearType = std::move(gearType);
+    mSupportsSizeSelection = supportsSizeSelection;
+    mModelSize = size;
     mParametricControl = loadedParametricControl;
     mParameterInfos = std::move(loadedParams);
     mParameterValues = std::move(loadedValues);
@@ -145,6 +222,28 @@ double NamModelEngine::GetExpectedSampleRate() const {
   }
 
   return GetModelSampleRateForProcessing();
+}
+
+double NamModelEngine::GetInputCalibrationGainDb(double interfaceLevel, bool enabled) const {
+  return enabled && mModel != nullptr && mModel->HasInputLevel()
+             ? interfaceLevel - mModel->GetInputLevel()
+             : 0.0;
+}
+
+double NamModelEngine::GetOutputCalibrationGainDb(double interfaceLevel, OutputMode mode) const {
+  if (mModel == nullptr) return 0.0;
+  if (mode == OutputMode::Auto) {
+    const bool amp = mGearType == "amp" || mGearType == "pedal_amp" || mGearType == "amp_cab" ||
+                     mGearType == "amp_pedal_cab";
+    mode = amp ? OutputMode::Normalized : OutputMode::Calibrated;
+  }
+  if (mode == OutputMode::Normalized && mModel->HasLoudness()) {
+    return -18.0 - mModel->GetLoudness();
+  }
+  if (mode == OutputMode::Calibrated && mModel->HasOutputLevel()) {
+    return mModel->GetOutputLevel() - interfaceLevel;
+  }
+  return 0.0;
 }
 
 const std::vector<ModelParameterInfo>& NamModelEngine::GetParameterInfos() const {

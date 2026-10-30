@@ -8,6 +8,7 @@
 
 namespace {
 constexpr const char* kModelPathStateKey = "modelPath";
+constexpr const char* kModelSizeStateKey = "hyperA2Size";
 constexpr const char* kIrPathStateKey = "irPath";
 constexpr const char* kRuntimeParamsStateType = "RUNTIME_PARAMS";
 constexpr const char* kRuntimeParamStateType = "PARAM";
@@ -131,6 +132,9 @@ NamParametricPluginAudioProcessor::NamParametricPluginAudioProcessor()
   mInputGainParam = mValueTree.getRawParameterValue(ParamIDs::inputGainDb);
   mOutputGainParam = mValueTree.getRawParameterValue(ParamIDs::outputGainDb);
   mIrEnabledParam = mValueTree.getRawParameterValue(ParamIDs::irEnabled);
+  mCalibrateInputParam = mValueTree.getRawParameterValue(ParamIDs::calibrateInput);
+  mInputCalibrationParam = mValueTree.getRawParameterValue(ParamIDs::inputCalibration);
+  mOutputModeParam = mValueTree.getRawParameterValue(ParamIDs::outputMode);
   startTimerHz(30);
 }
 
@@ -191,8 +195,16 @@ void NamParametricPluginAudioProcessor::processBlock(juce::AudioBuffer<float>& b
   TryPromoteStagedIr();
   ApplyPendingRuntimeParameterChanges();
 
-  const float inputGainDb = mInputGainParam != nullptr ? mInputGainParam->load() : 0.0f;
-  const float outputGainDb = mOutputGainParam != nullptr ? mOutputGainParam->load() : 0.0f;
+  float inputGainDb = mInputGainParam != nullptr ? mInputGainParam->load() : 0.0f;
+  float outputGainDb = mOutputGainParam != nullptr ? mOutputGainParam->load() : 0.0f;
+  if (mActiveProcessingState != nullptr) {
+    const double interfaceLevel = mInputCalibrationParam->load();
+    inputGainDb += static_cast<float>(mActiveProcessingState->model->GetInputCalibrationGainDb(
+        interfaceLevel, mCalibrateInputParam->load() >= 0.5f));
+    outputGainDb += static_cast<float>(mActiveProcessingState->model->GetOutputCalibrationGainDb(
+        interfaceLevel,
+        static_cast<namparametric::dsp::OutputMode>(static_cast<int>(mOutputModeParam->load()))));
+  }
   const float inputGain = juce::Decibels::decibelsToGain(inputGainDb);
   const float outputGain = juce::Decibels::decibelsToGain(outputGainDb);
   const bool irEnabled = mIrEnabledParam != nullptr && mIrEnabledParam->load() >= 0.5f;
@@ -247,6 +259,15 @@ NamParametricPluginAudioProcessor::CreateParameterLayout() {
       juce::ParameterID(ParamIDs::outputGainDb, 1), "Output Gain", gainRange, 0.0f, gainAttrs));
   params.push_back(std::make_unique<juce::AudioParameterBool>(
       juce::ParameterID(ParamIDs::irEnabled, 1), "IR Enabled", true));
+  params.push_back(std::make_unique<juce::AudioParameterBool>(
+      juce::ParameterID(ParamIDs::calibrateInput, 1), "Calibrate Input", true));
+  params.push_back(std::make_unique<juce::AudioParameterFloat>(
+      juce::ParameterID(ParamIDs::inputCalibration, 1), "Input Calibration",
+      juce::NormalisableRange<float>(-60.0f, 60.0f, 0.1f), 12.0f,
+      juce::AudioParameterFloatAttributes().withLabel("dBu")));
+  params.push_back(std::make_unique<juce::AudioParameterChoice>(
+      juce::ParameterID(ParamIDs::outputMode, 1), "Output Mode",
+      juce::StringArray{"Raw", "Normalized", "Calibrated", "Auto"}, 3));
 
   return {params.begin(), params.end()};
 }
@@ -297,7 +318,8 @@ void NamParametricPluginAudioProcessor::LoadModelAsync(const juce::File& modelFi
 void NamParametricPluginAudioProcessor::ClearModel() { StageModelClear(); }
 
 void NamParametricPluginAudioProcessor::StartModelLoad(
-    const juce::File& modelFile, std::vector<RestoredRuntimeParameterValue> restoredValues) {
+    const juce::File& modelFile, std::vector<RestoredRuntimeParameterValue> restoredValues,
+    const bool preserveRuntimeParameters) {
   if (!modelFile.existsAsFile()) {
     std::lock_guard<std::mutex> lock(mLoadMutex);
     mStatusText = "Model file does not exist: " + modelFile.getFullPathName();
@@ -305,7 +327,10 @@ void NamParametricPluginAudioProcessor::StartModelLoad(
   }
 
   std::lock_guard<std::mutex> lock(mLoadMutex);
-  LoadRequest request{modelFile, std::move(restoredValues), ++mLatestLoadRequestId};
+  mRequestedModelPath = modelFile.getFullPathName();
+  mRequestedRestoredValues = restoredValues;
+  LoadRequest request{modelFile, std::move(restoredValues), ++mLatestLoadRequestId, mModelSize,
+                      preserveRuntimeParameters};
   if (mLoadFuture.has_value()) {
     mQueuedLoadRequest = std::move(request);
     mStatusText = "Queued model: " + modelFile.getFileName();
@@ -326,11 +351,12 @@ void NamParametricPluginAudioProcessor::BeginModelLoadLocked(LoadRequest request
                                                       loadRequest = std::move(request)]() mutable {
     AsyncLoadResult result;
     result.requestId = loadRequest.requestId;
+    result.preserveRuntimeParameters = loadRequest.preserveRuntimeParameters;
     result.restoredValues = std::move(loadRequest.restoredValues);
     auto model = std::make_unique<namparametric::dsp::NamModelEngine>();
 
     std::string error;
-    if (!model->LoadModel(modelPath, error)) {
+    if (!model->LoadModel(modelPath, error, loadRequest.size)) {
       result.message = "Failed to load model: " + juce::String(error);
       return result;
     }
@@ -363,6 +389,10 @@ void NamParametricPluginAudioProcessor::BeginModelLoadLocked(LoadRequest request
     result.runtimeParameters =
         ConvertRuntimeParameters(processingState->model->GetParameterInfos());
     result.message = "Loaded model: " + juce::File(fullPath).getFileName();
+    if (processingState->model->SupportsSizeSelection()) {
+      result.message +=
+          loadRequest.size == namparametric::dsp::ModelSize::Full ? " (Full)" : " (Lite)";
+    }
     result.processingState = std::move(processingState);
     return result;
   }));
@@ -382,8 +412,25 @@ void NamParametricPluginAudioProcessor::CollectCompletedModelLoad() {
   if (result.requestId == mLatestLoadRequestId) {
     if (!result.success) {
       mStatusText = result.message;
+      const auto* previous = mStagedProcessingState != nullptr ? mStagedProcessingState.get()
+                                                               : mActiveProcessingState.get();
+      mModelSize = previous != nullptr ? previous->model->GetModelSize()
+                                       : namparametric::dsp::ModelSize::Full;
+      mRequestedModelPath = mModelPath;
     } else {
+      if (result.preserveRuntimeParameters && result.loadedPath == mModelPath &&
+          mRuntimeParameterMailbox != nullptr) {
+        // Read at completion, so knobs turned during a size reload are retained too.
+        result.restoredValues.clear();
+        for (size_t i = 0; i < mRuntimeParameters.size(); ++i) {
+          if (const auto value = mRuntimeParameterMailbox->Read(i)) {
+            result.restoredValues.push_back(
+                {static_cast<int>(i), mRuntimeParameters[i].name.toStdString(), *value});
+          }
+        }
+      }
       ApplyRestoredValues(result);
+      mSupportsModelSizeSelection = result.processingState->model->SupportsSizeSelection();
       mStagedProcessingState = std::move(result.processingState);
       mRuntimeParameterMailbox = mStagedProcessingState->mailbox;
       mRuntimeParameters = std::move(result.runtimeParameters);
@@ -456,10 +503,29 @@ void NamParametricPluginAudioProcessor::ApplyRestoredValues(AsyncLoadResult& res
   }
 
   result.processingState->mailbox->PublishAll(values);
+  // Settle the newly constructed network on its restored controls before handing
+  // it to the audio thread. Otherwise its initial history still belongs to the
+  // defaults, which is especially audible when switching A2 sizes.
+  if (result.processingState->model->SetParameterValues(values)) {
+    for (;;) {
+      const auto generation = mHostProcessingConfig->generation.load(std::memory_order_acquire);
+      if ((generation & 1ULL) != 0) continue;
+      const auto rate = mHostProcessingConfig->sampleRate.load(std::memory_order_relaxed);
+      const auto block = std::max(mHostProcessingConfig->blockSize.load(std::memory_order_relaxed),
+                                  kMinimumModelResetBlockSize);
+      if (generation != mHostProcessingConfig->generation.load(std::memory_order_acquire)) continue;
+      result.processingState->model->Reset(rate, block);
+      if (generation == mHostProcessingConfig->generation.load(std::memory_order_acquire)) break;
+    }
+    result.processingState->mailbox->TryReadStable(values, result.processingState->consumedVersion);
+  }
 }
 
 void NamParametricPluginAudioProcessor::StageModelClear() {
   std::lock_guard<std::mutex> lock(mLoadMutex);
+  mRequestedModelPath.clear();
+  mRequestedRestoredValues.clear();
+  mSupportsModelSizeSelection = false;
   ++mLatestLoadRequestId;
   mQueuedLoadRequest.reset();
   mStagedProcessingState.reset();
@@ -615,6 +681,35 @@ bool NamParametricPluginAudioProcessor::HasModelLoaded() const {
          (mActiveProcessingState != nullptr || mStagedProcessingState != nullptr);
 }
 
+bool NamParametricPluginAudioProcessor::SupportsModelSizeSelection() const {
+  std::lock_guard<std::mutex> lock(mLoadMutex);
+  return mSupportsModelSizeSelection && !mClearModelStaged;
+}
+
+namparametric::dsp::ModelSize NamParametricPluginAudioProcessor::GetModelSize() const {
+  std::lock_guard<std::mutex> lock(mLoadMutex);
+  return mModelSize;
+}
+
+void NamParametricPluginAudioProcessor::SetModelSize(const namparametric::dsp::ModelSize size) {
+  juce::String path;
+  std::vector<RestoredRuntimeParameterValue> restored;
+  bool preserve = false;
+  {
+    std::lock_guard<std::mutex> lock(mLoadMutex);
+    if (size == mModelSize) {
+      return;
+    }
+    mModelSize = size;
+    path = mRequestedModelPath.isEmpty() ? mModelPath : mRequestedModelPath;
+    restored = mRequestedRestoredValues;
+    preserve = path == mModelPath;
+  }
+  if (path.isNotEmpty()) {
+    StartModelLoad(juce::File(path), std::move(restored), preserve);
+  }
+}
+
 std::vector<NamParametricPluginAudioProcessor::RuntimeParameterInfo>
 NamParametricPluginAudioProcessor::GetRuntimeParameters() const {
   std::lock_guard<std::mutex> lock(mLoadMutex);
@@ -693,6 +788,9 @@ void NamParametricPluginAudioProcessor::getStateInformation(juce::MemoryBlock& d
     mailbox = mRuntimeParameterMailbox;
   }
   state.setProperty(kModelPathStateKey, modelPath, nullptr);
+  state.setProperty(kModelSizeStateKey,
+                    GetModelSize() == namparametric::dsp::ModelSize::Lite ? "lite" : "full",
+                    nullptr);
   state.setProperty(kIrPathStateKey, GetIrPath(), nullptr);
 
   auto child = state.getChildWithName(kRuntimeParamsStateType);
@@ -726,6 +824,13 @@ void NamParametricPluginAudioProcessor::setStateInformation(const void* data,
   }
 
   mValueTree.replaceState(tree);
+  {
+    std::lock_guard<std::mutex> lock(mLoadMutex);
+    // Old sessions and models without a size preference always start at Full.
+    mModelSize = tree.getProperty(kModelSizeStateKey).toString() == "lite"
+                     ? namparametric::dsp::ModelSize::Lite
+                     : namparametric::dsp::ModelSize::Full;
+  }
   std::vector<RestoredRuntimeParameterValue> restoredValues;
   const auto runtimeTree = tree.getChildWithName(kRuntimeParamsStateType);
   if (runtimeTree.isValid()) {
