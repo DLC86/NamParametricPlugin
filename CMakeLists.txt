@@ -248,6 +248,7 @@ if(NAM_PARAMETRIC_BUILD_TESTS)
     EIGEN_NO_DEBUG=1 NAM_SAMPLE_FLOAT=1 NAM_ENABLE_A2_FAST=1)
   juce_add_console_app(hyper_a2_processor_test PRODUCT_NAME "HyperA2 Processor Test")
   target_sources(hyper_a2_processor_test PRIVATE Tests/HyperA2ProcessorTest.cpp
+    Tests/SwitchCombinationTest.cpp
     $<TARGET_OBJECTS:nam_core_runtime>)
   target_include_directories(hyper_a2_processor_test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/Source)
   target_include_directories(hyper_a2_processor_test SYSTEM PRIVATE ${AUDIODSPTOOLS_DIR} ${NAM_CORE_DIR}
@@ -260,6 +261,11 @@ if(NAM_PARAMETRIC_BUILD_TESTS)
     add_test(NAME hyper_a2_engine COMMAND hyper_a2_engine_test "${NAM_HYPER_A2_TEST_DIR}")
     add_test(NAME hyper_a2_processor COMMAND hyper_a2_processor_test "${NAM_HYPER_A2_TEST_DIR}")
     set_tests_properties(hyper_a2_processor PROPERTIES TIMEOUT 180)
+  endif()
+  if(BUILD_TESTING AND EXISTS "${NAM_HYPER_A2_TEST_DIR}/switch_combinations.json")
+    add_test(NAME switch_combinations COMMAND hyper_a2_processor_test
+      --switches "${NAM_HYPER_A2_TEST_DIR}")
+    set_tests_properties(switch_combinations PROPERTIES TIMEOUT 180)
   endif()
   set(NAM_HYPER_TEST_MODEL "" CACHE FILEPATH "HyperWaveNet model used by CTest")
   if(BUILD_TESTING AND EXISTS "${NAM_CONCAT_TEST_MODEL}" AND EXISTS "${NAM_HYPER_TEST_MODEL}")

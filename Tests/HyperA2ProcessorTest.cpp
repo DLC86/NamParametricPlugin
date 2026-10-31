@@ -9,6 +9,8 @@
 #include "UI/ModelBarComponent.h"
 #include "json.hpp"
 
+void TestSwitchCombinations(const std::filesystem::path& directory);
+
 namespace {
 using namparametric::dsp::ModelSize;
 
@@ -50,6 +52,11 @@ void RenderAndCompare(NamParametricPluginAudioProcessor& processor, const std::v
 
 int main(int argc, const char* const* argv) {
   try {
+    if (argc == 3 && std::string(argv[1]) == "--switches") {
+      juce::ScopedJuceInitialiser_GUI gui;
+      TestSwitchCombinations(std::filesystem::path(argv[2]));
+      return 0;
+    }
     Check(argc == 2, "Usage: hyper_a2_processor_test <fixture-directory>");
     juce::ScopedJuceInitialiser_GUI gui;
     const std::filesystem::path directory(argv[1]);

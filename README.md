@@ -183,6 +183,30 @@ build/mac-debug/NamParametricPlugin_artefacts/Debug/AU/NAM Parametric Plugin.com
 4. If the model is parametric, dynamic controls appear under `Model Parameters`.
 5. Adjust `Input Gain` / `Output Gain` as needed (bounded to `-12/+12 dB`).
 
+Multiple switches can coexist with continuous knobs. Each switch shows one button per
+named position, with one selected at a time; selecting a position leaves the other
+switches unchanged. All combinations of positions are selectable. The panel scrolls
+vertically for multiple rows and horizontally when a single switch is too wide, so
+every position stays reachable. Session saves and HyperA2 Full/Lite changes preserve
+each control's selection.
+
+### Multi-switch integration test
+
+Generate actual trainer exports and reference audio for all 30 combinations of
+three switches (3, 2 and 5 positions), mixed with two knobs:
+
+```bash
+python Tests/generate_switch_fixture.py --trainer-dir /path/to/neural-amp-modeler-parametric --output build/test-fixtures
+```
+
+Configure with `-DNAM_HYPER_A2_TEST_DIR=/absolute/path/to/build/test-fixtures` and
+`-DNAM_PARAMETRIC_BUILD_TESTS=ON`, then build `hyper_a2_processor_test`. Run
+`ctest --test-dir <build-directory> -C Release -R switch_combinations --output-on-failure`.
+The test clicks the real controls and checks audio against the trainer for
+HyperA2 Full/Lite, HyperWaveNet and ConcatWaveNet (120 combinations in total).
+It also checks independent defaults, session restoration, selection preservation
+across A2 size changes, and access to all positions of a wide 20-position switch.
+
 ## Manual Validation Checklist
 
 Run these checks before merging major changes:

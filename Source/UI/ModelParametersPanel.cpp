@@ -33,7 +33,7 @@ ModelParametersPanel::ModelParametersPanel() {
   addAndMakeVisible(mEyebrow);
 
   mViewport.setViewedComponent(&mContent, false);
-  mViewport.setScrollBarsShown(true, false);
+  mViewport.setScrollBarsShown(true, true);
   addAndMakeVisible(mViewport);
 
   mEmptyLabel.setText("No dynamic parameters for this model.", juce::dontSendNotification);
@@ -155,7 +155,14 @@ void ModelParametersPanel::resized() {
 }
 
 void ModelParametersPanel::LayoutContent() {
-  const int contentWidth = juce::jmax(1, mViewport.getWidth() - mViewport.getScrollBarThickness());
+  int contentWidth = juce::jmax(1, mViewport.getWidth() - mViewport.getScrollBarThickness());
+  // Keep every segment reachable when one switch is wider than the viewport.
+  for (const auto& control : mControls) {
+    if (control.switchControl != nullptr) {
+      contentWidth = juce::jmax(contentWidth,
+                               control.switchControl->getPreferredWidth() + 2 * kSidePadding);
+    }
+  }
 
   if (mControls.empty()) {
     mEmptyLabel.setVisible(true);
