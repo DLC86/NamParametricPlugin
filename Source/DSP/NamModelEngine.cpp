@@ -21,6 +21,7 @@ inline constexpr double PI = std::numbers::pi_v<double>;
 #include "dsp/ResamplingContainer/ResamplingContainer.h"
 #include "get_dsp.h"
 #include "wavenet/a2_fast.h"
+#include "wavenet/hyperwavenet.h"
 
 namespace namparametric::dsp {
 
@@ -83,7 +84,109 @@ nlohmann::json SelectHyperA2Branch(const nlohmann::json& model, ModelSize size) 
   }
   return child;
 }
+
+bool IsStaticA2Container(const nlohmann::json& model) {
+  if (model.at("architecture") != "SlimmableContainer") return false;
+  const auto& children = model.at("config").at("submodels");
+  if (!children.is_array() || children.size() != 2) return false;
+  for (size_t index = 0; index < 2; ++index) {
+    const auto& entry = children[index];
+    const auto& child = entry.at("model");
+    int channels = 0;
+    if (entry.at("max_value") != (index == 0 ? 0.5 : 1.0) ||
+        child.at("architecture") != "WaveNet" ||
+        !nam::wavenet::a2_fast::is_a2_shape(child.at("config"), &channels) ||
+        channels != (index == 0 ? 3 : 8))
+      return false;
+  }
+  return true;
+}
+
+nlohmann::json BakeWaveNet(const nlohmann::json& source, std::span<const float> values) {
+  // Use the same parser, range validation and hypernetwork implementation as playback.
+  // Construction also checks the complete base-weight layout before ApplyConditioning.
+  auto validated = nam::get_dsp(source);
+  auto parsed = nam::wavenet::create_hyperwavenet_config(source.at("config"),
+                                                         validated->GetExpectedSampleRate());
+  const auto& config = dynamic_cast<const nam::wavenet::HyperWaveNetConfig&>(*parsed);
+  const auto weights = source.at("weights").get<std::vector<float>>();
+  const auto stateCount = nam::Hypernetwork::SerializedStateCount(config.hypernet, config.params);
+  const auto baseCount = weights.size() - stateCount;
+  const std::vector<float> base(weights.begin(),
+                                weights.begin() + static_cast<std::ptrdiff_t>(baseCount));
+  nam::Hypernetwork hypernet(config.hypernet, config.params,
+                             std::span<const float>(weights).subspan(baseCount));
+  hypernet.ValidateParams(values);
+  for (size_t i = 0; i < values.size(); ++i) {
+    if (values[i] < config.params[i].min || values[i] > config.params[i].max)
+      throw std::runtime_error("Control is outside its model range: " + config.params[i].name);
+  }
+  auto conditioned = base;
+  hypernet.ApplyConditioning(base, values, conditioned);
+  if (!std::all_of(conditioned.begin(), conditioned.end(),
+                   [](float value) { return std::isfinite(value); }))
+    throw std::runtime_error("The generated model contains non-finite weights.");
+  auto result = source;
+  result["version"] = nam::LATEST_FULLY_SUPPORTED_NAM_FILE_VERSION;
+  result["architecture"] = "WaveNet";
+  result["config"].erase("params");
+  result["config"].erase("hypernet");
+  result["weights"] = conditioned;
+  return result;
+}
 }  // namespace
+
+nlohmann::json NamModelEngine::BakeStaticModel(const nlohmann::json& source,
+                                               const std::span<const float> values,
+                                               const std::string& sourceFileName) {
+  const auto architecture = source.at("architecture").get<std::string>();
+  nlohmann::json result;
+  if (architecture == "HyperWaveNet") {
+    result = BakeWaveNet(source, values);
+  } else if (architecture == "HyperA2") {
+    result = source;
+    result["version"] = nam::LATEST_FULLY_SUPPORTED_NAM_FILE_VERSION;
+    result["architecture"] = "SlimmableContainer";
+    result["config"] = {
+        {"submodels",
+         nlohmann::json::array(
+             {{{"max_value", 0.5},
+               {"model", BakeWaveNet(SelectHyperA2Branch(source, ModelSize::Lite), values)}},
+              {{"max_value", 1.0},
+               {"model", BakeWaveNet(SelectHyperA2Branch(source, ModelSize::Full), values)}}})}};
+    result["weights"] = nlohmann::json::array();
+  } else {
+    throw std::runtime_error("Static export supports HyperWaveNet and HyperA2 models only.");
+  }
+  const auto specs = nam::parse_param_specs(source.at("config"), architecture);
+  nlohmann::json controls = nlohmann::json::array();
+  for (size_t i = 0; i < specs.size(); ++i) {
+    nlohmann::json control = {
+        {"name", specs[i].name}, {"type", specs[i].type}, {"value", values[i]}};
+    if (specs[i].type == "switch")
+      control["label"] = specs[i].enum_names.at(static_cast<size_t>(values[i]));
+    controls.push_back(std::move(control));
+  }
+  nlohmann::json provenance = {{"schema_version", 1},
+                               {"source_file", sourceFileName},
+                               {"source_architecture", architecture},
+                               {"controls", controls}};
+  if (architecture == "HyperA2") provenance["variants"] = {"lite", "full"};
+  const auto addMetadata = [&provenance](nlohmann::json& model) {
+    if (!model.contains("metadata") || !model["metadata"].is_object())
+      model["metadata"] = nlohmann::json::object();
+    auto& custom = model["metadata"]["nam_parametric_plugin"];
+    if (!custom.is_object()) custom = nlohmann::json::object();
+    custom["static_export"] = provenance;
+  };
+  addMetadata(result);
+  if (architecture == "HyperA2") {
+    for (auto& entry : result["config"]["submodels"]) addMetadata(entry["model"]);
+  }
+  // Validate the stock file before any destination is created or replaced.
+  auto validated = nam::get_dsp(result);
+  return result;
+}
 
 struct NamModelEngine::ResamplerState {
   explicit ResamplerState(double renderingSampleRate) : resampler(renderingSampleRate) {}
@@ -105,9 +208,19 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
       throw std::runtime_error("Could not open model file.");
     }
     auto config = nlohmann::json::parse(stream);
-    const bool supportsSizeSelection = config.at("architecture") == "HyperA2";
-    if (supportsSizeSelection) {
+    const bool hyperA2 = config.at("architecture") == "HyperA2";
+    const bool staticA2 = IsStaticA2Container(config);
+    const bool supportsSizeSelection = hyperA2 || staticA2;
+    std::shared_ptr<const nlohmann::json> exportSource;
+    if (hyperA2 || config.at("architecture") == "HyperWaveNet")
+      exportSource = std::make_shared<const nlohmann::json>(config);
+    if (hyperA2) {
       config = SelectHyperA2Branch(config, size);
+    } else if (staticA2) {
+      // The saved file still contains both branches; playback constructs just the selected one.
+      auto child = config.at("config").at("submodels")[size == ModelSize::Lite ? 0 : 1].at("model");
+      nam::verify_config_version(config.at("version").get<std::string>());
+      config = std::move(child);
     }
     auto loadedModel = nam::get_dsp(config);
     if (loadedModel == nullptr) {
@@ -151,6 +264,7 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
       gearType = config["metadata"]["gear_type"].get<std::string>();
     }
     mModel = std::move(loadedModel);
+    mExportSource = std::move(exportSource);
     mGearType = std::move(gearType);
     mSupportsSizeSelection = supportsSizeSelection;
     mModelSize = size;

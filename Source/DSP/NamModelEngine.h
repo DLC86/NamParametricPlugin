@@ -32,6 +32,12 @@ class NamModelEngine {
                  ModelSize size = ModelSize::Full);
   [[nodiscard]] bool SupportsSizeSelection() const { return mSupportsSizeSelection; }
   [[nodiscard]] ModelSize GetModelSize() const { return mModelSize; }
+  [[nodiscard]] std::shared_ptr<const nlohmann::json> GetExportSource() const {
+    return mExportSource;
+  }
+  // Offline only: generate fixed weights without touching the live audio model.
+  static nlohmann::json BakeStaticModel(const nlohmann::json& source, std::span<const float> values,
+                                        const std::string& sourceFileName);
   [[nodiscard]] double GetInputCalibrationGainDb(double interfaceLevel, bool enabled) const;
   [[nodiscard]] double GetOutputCalibrationGainDb(double interfaceLevel, OutputMode mode) const;
 
@@ -50,6 +56,7 @@ class NamModelEngine {
   [[nodiscard]] bool NeedToResample() const;
 
   std::unique_ptr<nam::DSP> mModel;
+  std::shared_ptr<const nlohmann::json> mExportSource;
   bool mSupportsSizeSelection = false;
   ModelSize mModelSize = ModelSize::Full;
   std::string mGearType;

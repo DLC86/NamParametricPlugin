@@ -1,6 +1,7 @@
 #include "NamParametricPluginProcessor.h"
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 
@@ -16,6 +17,22 @@ constexpr const char* kRuntimeParamIndexStateKey = "index";
 constexpr const char* kRuntimeParamNameStateKey = "name";
 constexpr const char* kRuntimeParamValueStateKey = "value";
 constexpr int kMinimumModelResetBlockSize = 2048;
+
+juce::String LegalExportName(const juce::String& text) {
+  juce::String result;
+  const juce::String illegal("<>:\"/\\|?*");
+  for (auto character : text)
+    result += juce::String::charToString(
+        character < 32 || illegal.containsChar(character) ? '_' : character);
+  return result;
+}
+
+juce::String ControlValueText(float value) {
+  // Shortest decimal that round-trips to the actual float used by the model.
+  char buffer[64];
+  const auto converted = std::to_chars(std::begin(buffer), std::end(buffer), value);
+  return juce::String::fromUTF8(buffer, static_cast<int>(converted.ptr - buffer));
+}
 
 std::vector<NamParametricPluginAudioProcessor::RuntimeParameterInfo> ConvertRuntimeParameters(
     const std::vector<namparametric::dsp::ModelParameterInfo>& params) {
@@ -431,6 +448,7 @@ void NamParametricPluginAudioProcessor::CollectCompletedModelLoad() {
       }
       ApplyRestoredValues(result);
       mSupportsModelSizeSelection = result.processingState->model->SupportsSizeSelection();
+      mExportSource = result.processingState->model->GetExportSource();
       mStagedProcessingState = std::move(result.processingState);
       mRuntimeParameterMailbox = mStagedProcessingState->mailbox;
       mRuntimeParameters = std::move(result.runtimeParameters);
@@ -530,6 +548,7 @@ void NamParametricPluginAudioProcessor::StageModelClear() {
   mQueuedLoadRequest.reset();
   mStagedProcessingState.reset();
   mRuntimeParameterMailbox.reset();
+  mExportSource.reset();
   mRuntimeParameters.clear();
   mModelPath.clear();
   mStatusText = "No model loaded";
@@ -753,6 +772,64 @@ std::optional<double> NamParametricPluginAudioProcessor::GetRuntimeParameterValu
   }
   const auto value = mailbox->Read(index);
   return value.has_value() ? std::optional<double>(*value) : std::nullopt;
+}
+
+bool NamParametricPluginAudioProcessor::CanExportStaticModel() const {
+  std::lock_guard<std::mutex> lock(mLoadMutex);
+  return mExportSource != nullptr && !mClearModelStaged && !mLoadFuture && !mQueuedLoadRequest;
+}
+
+std::optional<NamParametricPluginAudioProcessor::StaticExportSnapshot>
+NamParametricPluginAudioProcessor::CreateStaticExportSnapshot() const {
+  std::lock_guard<std::mutex> lock(mLoadMutex);
+  if (mExportSource == nullptr || mClearModelStaged || mLoadFuture || mQueuedLoadRequest ||
+      mRuntimeParameterMailbox == nullptr)
+    return std::nullopt;
+
+  StaticExportSnapshot snapshot;
+  snapshot.source = mExportSource;
+  snapshot.sourceFile = juce::File(mModelPath);
+  snapshot.values.resize(mRuntimeParameters.size());
+  uint64_t version = 0;
+  if (!mRuntimeParameterMailbox->TryReadStable(snapshot.values, version)) return std::nullopt;
+  juce::StringArray settings;
+  for (size_t index = 0; index < mRuntimeParameters.size(); ++index) {
+    const auto& parameter = mRuntimeParameters[index];
+    const float value = snapshot.values[index];
+    const auto label = parameter.IsSwitch() ? parameter.enumNames.at(static_cast<size_t>(value))
+                                            : ControlValueText(value);
+    settings.add(parameter.name + "=" + label);
+  }
+  snapshot.suggestedFileName = LegalExportName(snapshot.sourceFile.getFileNameWithoutExtension() +
+                                               " (" + settings.joinIntoString(", ") + ").nam");
+  return snapshot;
+}
+
+juce::Result NamParametricPluginAudioProcessor::ExportStaticModel(
+    const StaticExportSnapshot& snapshot, const juce::File& destination) {
+  try {
+    if (snapshot.source == nullptr) return juce::Result::fail("No parametric model to export.");
+    if (destination == snapshot.sourceFile)
+      return juce::Result::fail("Choose a different filename to preserve the parametric model.");
+    const auto model = namparametric::dsp::NamModelEngine::BakeStaticModel(
+        *snapshot.source, snapshot.values, snapshot.sourceFile.getFileName().toStdString());
+    const auto text = model.dump(2);
+    // A failed write leaves an existing destination intact.
+    juce::TemporaryFile temporary(destination);
+    {
+      juce::FileOutputStream stream(temporary.getFile());
+      if (!stream.openedOk()) return stream.getStatus();
+      if (!stream.write(text.data(), text.size()))
+        return juce::Result::fail("Could not write the NAM file.");
+      stream.flush();
+      if (stream.getStatus().failed()) return stream.getStatus();
+    }
+    if (!temporary.overwriteTargetFileWithTemporary())
+      return juce::Result::fail("Could not save the NAM file to the selected destination.");
+    return juce::Result::ok();
+  } catch (const std::exception& error) {
+    return juce::Result::fail(juce::String::fromUTF8(error.what()));
+  }
 }
 
 void NamParametricPluginAudioProcessor::ApplyPendingRuntimeParameterChanges() {

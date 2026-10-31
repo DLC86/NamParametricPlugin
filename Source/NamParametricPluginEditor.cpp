@@ -1,6 +1,7 @@
 #include "NamParametricPluginEditor.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 #include "UI/CalibrationSettingsComponent.h"
@@ -97,6 +98,9 @@ void NamParametricPluginAudioProcessorEditor::UpdateModelBarInfo() {
   mModelBar.SetModelInfo(loaded, text);
   mModelBar.SetSizeSelection(mProcessor.SupportsModelSizeSelection(),
                              mProcessor.GetModelSize() == namparametric::dsp::ModelSize::Full);
+  mModelBar.getExportButton().setEnabled(mProcessor.CanExportStaticModel() &&
+                                         mExportChooser == nullptr && !mExportFuture);
+  mModelBar.getExportButton().setButtonText(mExportFuture ? "Exporting..." : "Export NAM...");
 }
 
 void NamParametricPluginAudioProcessorEditor::UpdateIrBarInfo() {
@@ -153,6 +157,51 @@ void NamParametricPluginAudioProcessorEditor::ShowIrChooser() {
   });
 }
 
+void NamParametricPluginAudioProcessorEditor::ShowStaticExportChooser() {
+  if (mExportChooser != nullptr || mExportFuture) return;
+  auto snapshot = mProcessor.CreateStaticExportSnapshot();
+  if (!snapshot) {
+    juce::AlertWindow::showMessageBoxAsync(
+        juce::MessageBoxIconType::WarningIcon, "Static NAM export",
+        "The model is changing. Please try again once it has loaded.");
+    return;
+  }
+  const auto suggested = snapshot->sourceFile.getSiblingFile(snapshot->suggestedFileName);
+  mExportChooser = std::make_unique<juce::FileChooser>("Export static NAM", suggested, "*.nam");
+  UpdateModelBarInfo();
+  const int flags = juce::FileBrowserComponent::saveMode |
+                    juce::FileBrowserComponent::canSelectFiles |
+                    juce::FileBrowserComponent::warnAboutOverwriting;
+  juce::Component::SafePointer<NamParametricPluginAudioProcessorEditor> safeThis(this);
+  mExportChooser->launchAsync(
+      flags, [safeThis, snapshot = std::move(*snapshot)](const juce::FileChooser& chooser) {
+        if (safeThis == nullptr) return;
+        const auto selected = chooser.getResult();
+        if (selected != juce::File()) {
+          // JUCE's chooser adds the .nam extension. Retain the user's destination exactly,
+          // so the overwrite confirmation always refers to the file that will be written.
+          safeThis->mExportDestination = selected;
+          safeThis->mExportFuture.emplace(std::async(std::launch::async, [snapshot, selected]() {
+            return NamParametricPluginAudioProcessor::ExportStaticModel(snapshot, selected);
+          }));
+        }
+        safeThis->mExportChooser.reset();
+        safeThis->UpdateModelBarInfo();
+      });
+}
+
+void NamParametricPluginAudioProcessorEditor::CollectStaticExport() {
+  if (!mExportFuture ||
+      mExportFuture->wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+    return;
+  const auto result = mExportFuture->get();
+  mExportFuture.reset();
+  juce::AlertWindow::showMessageBoxAsync(
+      result.wasOk() ? juce::MessageBoxIconType::InfoIcon : juce::MessageBoxIconType::WarningIcon,
+      "Static NAM export",
+      result.wasOk() ? "Saved " + mExportDestination.getFileName() : result.getErrorMessage());
+}
+
 NamParametricPluginAudioProcessorEditor::NamParametricPluginAudioProcessorEditor(
     NamParametricPluginAudioProcessor& pluginProcessor)
     : juce::AudioProcessorEditor(&pluginProcessor), mProcessor(pluginProcessor) {
@@ -177,6 +226,7 @@ NamParametricPluginAudioProcessorEditor::NamParametricPluginAudioProcessorEditor
 
   mModelBar.getSelectButton().onClick = [this]() { ShowModelChooser(); };
   mModelBar.getClearButton().onClick = [this]() { mProcessor.ClearModel(); };
+  mModelBar.getExportButton().onClick = [this]() { ShowStaticExportChooser(); };
   mModelBar.getSizeSwitch().onChange = [this](int index) {
     mProcessor.SetModelSize(index == 0 ? namparametric::dsp::ModelSize::Full
                                        : namparametric::dsp::ModelSize::Lite);
@@ -239,6 +289,7 @@ void NamParametricPluginAudioProcessorEditor::resized() {
 }
 
 void NamParametricPluginAudioProcessorEditor::timerCallback() {
+  CollectStaticExport();
   UpdateModelBarInfo();
   UpdateIrBarInfo();
   UpdateRuntimeParameterControls();

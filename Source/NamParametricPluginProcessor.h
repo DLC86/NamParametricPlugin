@@ -37,6 +37,13 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
     [[nodiscard]] bool IsSwitch() const { return !enumNames.empty(); }
   };
 
+  struct StaticExportSnapshot {
+    std::shared_ptr<const nlohmann::json> source;
+    std::vector<float> values;
+    juce::File sourceFile;
+    juce::String suggestedFileName;
+  };
+
   NamParametricPluginAudioProcessor();
   ~NamParametricPluginAudioProcessor() override;
 
@@ -75,6 +82,11 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
   std::vector<RuntimeParameterInfo> GetRuntimeParameters() const;
   void SetRuntimeParameterValue(size_t index, double value);
   std::optional<double> GetRuntimeParameterValue(size_t index) const;
+  bool CanExportStaticModel() const;
+  std::optional<StaticExportSnapshot> CreateStaticExportSnapshot() const;
+  // Safe to run on a worker: uses only the immutable snapshot, never the live DSP.
+  static juce::Result ExportStaticModel(const StaticExportSnapshot& snapshot,
+                                        const juce::File& destination);
 
   void LoadIrAsync(const juce::File& irFile);
   void ClearIr();
@@ -193,6 +205,7 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
   bool mSupportsModelSizeSelection = false;
   std::vector<RuntimeParameterInfo> mRuntimeParameters;
   std::shared_ptr<RuntimeParameterMailbox> mRuntimeParameterMailbox;
+  std::shared_ptr<const nlohmann::json> mExportSource;
 
   std::vector<float> mInputScratch;
   std::vector<float> mOutputScratch;

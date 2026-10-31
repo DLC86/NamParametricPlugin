@@ -13,6 +13,7 @@ class ModelBarComponent final : public juce::Component {
 
   juce::TextButton& getSelectButton() { return mSelectButton; }
   juce::TextButton& getClearButton() { return mClearButton; }
+  juce::TextButton& getExportButton() { return mExportButton; }
   void SetModelInfo(bool isLoaded, const juce::String& text);
   SegmentedSwitch& getSizeSwitch() { return mSizeSwitch; }
   void SetSizeSelection(bool available, bool full);
@@ -21,6 +22,7 @@ class ModelBarComponent final : public juce::Component {
   juce::TextButton mSelectButton;
   juce::Label mNameLabel;
   juce::TextButton mClearButton;
+  juce::TextButton mExportButton{"Export NAM..."};
   SegmentedSwitch mSizeSwitch;
   bool mIsLoaded = false;
   juce::Rectangle<int> mDotBounds;

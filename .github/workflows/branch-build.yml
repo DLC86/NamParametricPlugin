@@ -34,9 +34,18 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }} -DNAM_PARAMETRIC_BUILD_TESTS=OFF
+        run: cmake --preset ${{ matrix.preset }} -DNAM_PARAMETRIC_BUILD_TESTS=ON
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} --parallel 3
+      - name: Verify static NAM export
+        run: ctest --test-dir build/${{ matrix.preset }} -C Release --output-on-failure -R "^static_export$"
+      - name: Upload export validation files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-Export-Validation
+          path: build/${{ matrix.preset }}/static-export-results/**
+          if-no-files-found: ignore
       - name: Package macOS bundles
         if: runner.os == 'macOS'
         run: |

@@ -257,6 +257,20 @@ if(NAM_PARAMETRIC_BUILD_TESTS)
     EIGEN_NO_DEBUG=1 NAM_SAMPLE_FLOAT=1 NAM_ENABLE_A2_FAST=1 JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
   target_link_libraries(hyper_a2_processor_test PRIVATE ${TARGET_NAME} juce::juce_audio_utils juce::juce_dsp)
+  juce_add_console_app(static_export_test PRODUCT_NAME "Static NAM Export Test")
+  target_sources(static_export_test PRIVATE Tests/StaticExportTest.cpp
+    $<TARGET_OBJECTS:nam_core_runtime>)
+  target_include_directories(static_export_test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/Source)
+  target_include_directories(static_export_test SYSTEM PRIVATE ${AUDIODSPTOOLS_DIR} ${NAM_CORE_DIR}
+    ${NAM_CORE_NAM_DIR} ${NAM_CORE_EIGEN_DIR} ${NAM_CORE_NLOHMANN_DIR})
+  target_compile_definitions(static_export_test PRIVATE EIGEN_MPL2_ONLY=1
+    EIGEN_NO_DEBUG=1 NAM_SAMPLE_FLOAT=1 NAM_ENABLE_A2_FAST=1 JUCE_MODAL_LOOPS_PERMITTED=1
+    JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
+  target_link_libraries(static_export_test PRIVATE ${TARGET_NAME} juce::juce_audio_utils juce::juce_dsp)
+  if(BUILD_TESTING)
+    add_test(NAME static_export COMMAND static_export_test "${CMAKE_CURRENT_BINARY_DIR}/static-export-results")
+    set_tests_properties(static_export PROPERTIES TIMEOUT 180)
+  endif()
   if(BUILD_TESTING AND EXISTS "${NAM_HYPER_A2_TEST_DIR}/manifest.json")
     add_test(NAME hyper_a2_engine COMMAND hyper_a2_engine_test "${NAM_HYPER_A2_TEST_DIR}")
     add_test(NAME hyper_a2_processor COMMAND hyper_a2_processor_test "${NAM_HYPER_A2_TEST_DIR}")

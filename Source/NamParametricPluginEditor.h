@@ -33,6 +33,8 @@ class NamParametricPluginAudioProcessorEditor final : public juce::AudioProcesso
   void UpdateIrBarInfo();
   void ShowModelChooser();
   void ShowIrChooser();
+  void ShowStaticExportChooser();
+  void CollectStaticExport();
   void UpdateResizeLimits();
   void timerCallback() override;
 
@@ -48,6 +50,9 @@ class NamParametricPluginAudioProcessorEditor final : public juce::AudioProcesso
 
   std::unique_ptr<juce::FileChooser> mModelChooser;
   std::unique_ptr<juce::FileChooser> mIrChooser;
+  std::unique_ptr<juce::FileChooser> mExportChooser;
+  std::optional<std::future<juce::Result>> mExportFuture;
+  juce::File mExportDestination;
   juce::RangedAudioParameter* mIrEnabledParameter = nullptr;
 
   std::unique_ptr<SliderAttachment> mInputAttachment;

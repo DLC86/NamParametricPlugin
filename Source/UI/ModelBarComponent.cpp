@@ -3,7 +3,8 @@
 #include "NamColours.h"
 
 namespace {
-constexpr int kSelectButtonWidth = 150;
+constexpr int kSelectButtonWidth = 120;
+constexpr int kExportButtonWidth = 112;
 constexpr int kDotDiameter = 8;
 constexpr int kClearButtonWidth = 22;
 }  // namespace
@@ -11,6 +12,10 @@ constexpr int kClearButtonWidth = 22;
 ModelBarComponent::ModelBarComponent() {
   mSelectButton.setButtonText("Select Model");
   addAndMakeVisible(mSelectButton);
+  mExportButton.setEnabled(false);
+  mExportButton.setTooltip(
+      "Export the current model controls as a static NAM. HyperA2 includes both Lite and Full.");
+  addAndMakeVisible(mExportButton);
 
   mNameLabel.setJustificationType(juce::Justification::centredLeft);
   mNameLabel.setFont(juce::Font(juce::FontOptions(15.0f)));
@@ -63,6 +68,8 @@ void ModelBarComponent::resized() {
   mClearButton.setBounds(bounds.removeFromRight(kClearButtonWidth)
                              .withSizeKeepingCentre(kClearButtonWidth, kClearButtonWidth));
   bounds.removeFromRight(6);
+  mExportButton.setBounds(bounds.removeFromRight(kExportButtonWidth));
+  bounds.removeFromRight(10);
   if (mSizeSwitch.isVisible()) {
     mSizeSwitch.setBounds(bounds.removeFromRight(mSizeSwitch.getPreferredWidth()));
     bounds.removeFromRight(10);

@@ -73,6 +73,10 @@ To use a model, download a `.nam` file and load it in the plugin (see [Usage Not
   - `Output Gain` (`-12 dB` to `+12 dB`)
 - Model load via file chooser (`.nam`).
 - Dynamic model parameters are generated in the plugin UI and applied at runtime.
+- **Export NAM...** freezes HyperWaveNet controls into a static WaveNet, or HyperA2
+  controls into one static file containing **both Lite and Full**. The suggested
+  filename includes the settings; custom metadata records every control name and
+  value. No retraining is required. See [Static NAM export](docs/Static-NAM-export.md).
 - `HyperA2` parametric files from the [DLC86 trainer](https://github.com/DLC86/neural-amp-modeler-parametric/tree/codex/parametric-a2)
   load with **Full (8 channels) selected by default**, independently of the trainer's
   playback preference. The model bar exposes **Full / Lite (3 channels)** for these files.
