@@ -22,7 +22,7 @@ jobs:
           grep -Fx "project(NamParametricPlugin VERSION $version)" CMakeLists.txt
           gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
             --target "$GITHUB_SHA" --title "NAM Parametric Plugin $version" \
-            --notes "Version $version refreshes the interface with a #bf0000 red accent and neutral gray surfaces of similar brightness. Includes the existing ASIO standalone backend, HyperA2 Full/Lite, .pnam and .nam support, calibration and Eco de-click. Audio behavior is unchanged. Windows x64 standalone and VST3; macOS universal standalone, VST3 and AU; Linux x86_64 standalone and VST3. Export, calibration and control-transition tests run on all platforms before publication."
+            --notes "Version $version refreshes the interface with a #bf0000 red accent and neutral gray surfaces of similar brightness. The TTS logo from NAM On Steroids is the application icon. Includes the existing ASIO standalone backend, HyperA2 Full/Lite, .pnam and .nam support, calibration and Eco de-click. Audio behavior is unchanged. Windows x64 standalone and VST3; macOS universal standalone, VST3 and AU; Linux x86_64 standalone and VST3. Export, calibration and control-transition tests run on all platforms before publication."
   build-macos:
     needs: prepare
     runs-on: macos-15-intel
@@ -145,7 +145,10 @@ jobs:
           python3 - <<'PY'
           import json, os, subprocess
           tag = os.environ['GITHUB_REF_NAME']
-          release = json.loads(subprocess.check_output(['gh', 'api', f'repos/{os.environ["GH_REPO"]}/releases/tags/{tag}']))
+          pages = json.loads(subprocess.check_output(['gh', 'api', f'repos/{os.environ["GH_REPO"]}/releases', '--paginate', '--slurp']))
+          matches = [r for page in pages for r in page if r['tag_name'] == tag]
+          assert len(matches) == 1
+          release = matches[0]
           assert release['draft'] and release['target_commitish'] == os.environ['GITHUB_SHA']
           prefix = f'NAM-Parametric-Plugin-{tag[1:]}-'
           expected = {prefix + suffix for suffix in (

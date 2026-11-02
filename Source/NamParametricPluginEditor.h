@@ -18,6 +18,7 @@ class NamParametricPluginAudioProcessorEditor final : public juce::AudioProcesso
 
   void paint(juce::Graphics&) override;
   void resized() override;
+  void parentHierarchyChanged() override;
 
  private:
   using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;

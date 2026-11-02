@@ -184,3 +184,5 @@ Best Practice recommendation:
 Please refer to the Steinberg ASIO usage guidelines for the use of ASIO, ASIO logo and ASIO
 compatible logos.
 //----------------------------------------------------------------------------------
+
+The TTS application icon is included from NAM On Steroids and belongs to The Tone Scientist.

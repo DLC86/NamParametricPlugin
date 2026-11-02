@@ -109,6 +109,8 @@ endif()
 juce_add_plugin(${TARGET_NAME}
   COMPANY_NAME "phillipmself"
   PRODUCT_NAME "NAM Parametric Plugin"
+  ICON_BIG "${CMAKE_CURRENT_LIST_DIR}/Resources/TTSLogo.png"
+  ICON_SMALL "${CMAKE_CURRENT_LIST_DIR}/Resources/TTSLogo.png"
   PLUGIN_MANUFACTURER_CODE PmSf
   PLUGIN_CODE NpPg
   IS_SYNTH FALSE
@@ -120,6 +122,8 @@ juce_add_plugin(${TARGET_NAME}
 )
 
 juce_generate_juce_header(${TARGET_NAME})
+juce_add_binary_data(TtsBranding HEADER_NAME TtsBranding.h NAMESPACE TtsBranding
+  SOURCES Resources/TTSLogo.png)
 
 if(WIN32)
   # JUCE disables ASIO by default. Propagate this to the standalone wrapper too.
@@ -205,6 +209,7 @@ target_compile_definitions(${TARGET_NAME} PRIVATE
 
 target_link_libraries(${TARGET_NAME}
   PRIVATE
+    TtsBranding
     audio_dsp_tools_runtime
     juce::juce_audio_utils
     juce::juce_dsp

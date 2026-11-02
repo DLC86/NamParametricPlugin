@@ -6,6 +6,7 @@
 
 #include "UI/CalibrationSettingsComponent.h"
 #include "UI/NamColours.h"
+#include "TtsBranding.h"
 
 namespace {
 constexpr int kTopBarHeight = 110;
@@ -273,6 +274,13 @@ NamParametricPluginAudioProcessorEditor::~NamParametricPluginAudioProcessorEdito
 
 void NamParametricPluginAudioProcessorEditor::paint(juce::Graphics& g) {
   g.fillAll(nam::ui::Colours::background);
+}
+
+void NamParametricPluginAudioProcessorEditor::parentHierarchyChanged() {
+  if (juce::JUCEApplicationBase::isStandaloneApp())
+    if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
+      window->setIcon(juce::ImageCache::getFromMemory(TtsBranding::TTSLogo_png,
+                                                    TtsBranding::TTSLogo_pngSize));
 }
 
 void NamParametricPluginAudioProcessorEditor::resized() {
