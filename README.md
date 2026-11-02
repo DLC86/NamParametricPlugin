@@ -1,5 +1,8 @@
 # NamParametricPlugin
 
+Version 0.4.3 refreshes the interface with a #bf0000 red accent and neutral gray
+surfaces, preserving the previous surface brightness. Audio behavior is unchanged.
+
 JUCE-based `VST3 + AU + Standalone` plugin for loading and running Neural Amp Modeler (`.nam` and `.pnam`) models,
 including parametric NAM models via `nam_core_parametric`.
 

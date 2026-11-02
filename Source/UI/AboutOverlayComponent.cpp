@@ -87,9 +87,9 @@ bool AboutOverlayComponent::keyPressed(const juce::KeyPress& key) {
 void AboutOverlayComponent::paint(juce::Graphics& g) {
   g.fillAll(juce::Colours::black.withAlpha(0.55f));
 
-  g.setColour(juce::Colour(0xff17181c));
+  g.setColour(juce::Colour(0xff181818));
   g.fillRoundedRectangle(mCardBounds.toFloat(), 8.0f);
-  g.setColour(juce::Colour(0xff323339));
+  g.setColour(juce::Colour(0xff333333));
   g.drawRoundedRectangle(mCardBounds.toFloat().reduced(0.5f), 8.0f, 1.0f);
 
   juce::AttributedString title;

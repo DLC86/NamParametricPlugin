@@ -9,7 +9,22 @@ permissions:
   contents: write
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create draft for verified native packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          grep -Fx "project(NamParametricPlugin VERSION $version)" CMakeLists.txt
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
+            --target "$GITHUB_SHA" --title "NAM Parametric Plugin $version" \
+            --notes "Version $version refreshes the interface with a #bf0000 red accent and neutral gray surfaces of similar brightness. Includes the existing ASIO standalone backend, HyperA2 Full/Lite, .pnam and .nam support, calibration and Eco de-click. Audio behavior is unchanged. Windows x64 standalone and VST3; macOS universal standalone, VST3 and AU; Linux x86_64 standalone and VST3. Export, calibration and control-transition tests run on all platforms before publication."
   build-macos:
+    needs: prepare
     runs-on: macos-15-intel
 
     steps:
@@ -36,6 +51,11 @@ jobs:
           ARTEFACT_DIR="build/mac-release/NamParametricPlugin_artefacts/Release"
           VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p dist
+          for entry in Standalone/app VST3/vst3 AU/component; do
+            format="${entry%/*}"
+            extension="${entry#*/}"
+            lipo "${ARTEFACT_DIR}/$format/NAM Parametric Plugin.$extension/Contents/MacOS/NAM Parametric Plugin" -verify_arch arm64 x86_64
+          done
 
           ditto -c -k --sequesterRsrc --keepParent \
             "${ARTEFACT_DIR}/Standalone/NAM Parametric Plugin.app" \
@@ -49,13 +69,14 @@ jobs:
             "${ARTEFACT_DIR}/AU/NAM Parametric Plugin.component" \
             "dist/NAM-Parametric-Plugin-${VERSION}-macOS-AU.zip"
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-artifacts
-          path: dist/*.zip
+      - name: Upload tested packages directly to draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "${{ github.ref_name }}" dist/*.zip
 
   build-windows:
+    needs: prepare
     runs-on: windows-latest
 
     steps:
@@ -85,6 +106,8 @@ jobs:
           $ErrorActionPreference = "Stop"
           $artefactDir = "build/windows-release/NamParametricPlugin_artefacts/Release"
           $version = "${env:GITHUB_REF_NAME}".TrimStart("v")
+          $info = (Get-Item -LiteralPath "$artefactDir/Standalone/NAM Parametric Plugin.exe").VersionInfo
+          if ($info.FileVersion -ne $version -or $info.ProductVersion -ne $version) { throw 'Binary version mismatch' }
           New-Item -ItemType Directory -Force -Path dist | Out-Null
 
           Compress-Archive -Path "$artefactDir/Standalone/NAM Parametric Plugin.exe", "$artefactDir/Standalone/THIRD-PARTY-NOTICES.md" `
@@ -93,35 +116,43 @@ jobs:
           Compress-Archive -Path "$artefactDir/VST3/NAM Parametric Plugin.vst3" `
             -DestinationPath "dist/NAM-Parametric-Plugin-$version-Windows-VST3.zip"
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-artifacts
-          path: dist/*.zip
+      - name: Upload tested packages directly to draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: gh release upload "${{ github.ref_name }}" dist/*.zip
 
   build-linux:
+    needs: prepare
     uses: ./.github/workflows/linux-build.yml
     with:
       source_ref: ${{ github.ref }}
+      release_tag: ${{ github.ref_name }}
+      upload_release: true
 
   publish-release:
     needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: Create GitHub Release
+      - uses: actions/checkout@v4
+      - name: Publish only after all seven native packages pass
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "${{ github.ref_name }}" \
-            dist/*.zip dist/*.tar.gz \
-            --repo "${{ github.repository }}" \
-            --target "${{ github.sha }}" \
-            --title "NAM Parametric Plugin ${{ github.ref_name }}" \
-            --notes "Eco de-click is now the initial Control smoothing setting: one running audio network and an experimental 5 ms correction of control-induced output steps. Settings also offers the previous Crossfade mode for comparison (two running networks, higher CPU). Both .pnam parametric exports and legacy .nam files can be loaded, retaining all model metadata. The selection is recalled with the session; Full remains the initial HyperA2 size. Windows x64, macOS universal (arm64 + x86_64) and Linux x86_64 packages. Audio, calibration, export and control-transition tests run on all three platforms. Linux builds are tested on Ubuntu 22.04. See the README for installation instructions. Windows and macOS binaries are unsigned."
+          python3 - <<'PY'
+          import json, os, subprocess
+          tag = os.environ['GITHUB_REF_NAME']
+          release = json.loads(subprocess.check_output(['gh', 'api', f'repos/{os.environ["GH_REPO"]}/releases/tags/{tag}']))
+          assert release['draft'] and release['target_commitish'] == os.environ['GITHUB_SHA']
+          prefix = f'NAM-Parametric-Plugin-{tag[1:]}-'
+          expected = {prefix + suffix for suffix in (
+              'Windows-Standalone.zip', 'Windows-VST3.zip',
+              'macOS-Standalone.zip', 'macOS-VST3.zip', 'macOS-AU.zip',
+              'Linux-x86_64-Standalone.tar.gz', 'Linux-x86_64-VST3.tar.gz')}
+          assert {a['name'] for a in release['assets']} == expected
+          assert all(a['state'] == 'uploaded' and a['size'] > 0 for a in release['assets'])
+          subprocess.run(['gh', 'release', 'edit', tag, '--draft=false'], check=True)
+          PY
