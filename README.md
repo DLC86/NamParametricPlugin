@@ -46,6 +46,21 @@ Prebuilt builds are published on the
 3. **This build is unsigned**, so Windows SmartScreen may warn that it's from an unrecognized
    publisher. Click **More info**, then **Run anyway**. You only need to do this once per download.
 
+### Linux (x86_64)
+
+1. Download `NAM-Parametric-Plugin-<version>-Linux-x86_64-VST3.tar.gz` and/or
+   `...-Linux-x86_64-Standalone.tar.gz` from this fork's Releases page.
+2. Extract the VST3 archive and place the complete `NAM Parametric Plugin.vst3`
+   directory in `~/.vst3/`, then rescan plugins in your Linux DAW.
+3. Extract the standalone archive and run `NAM Parametric Plugin`. The tar archive
+   preserves its executable permission.
+
+Builds are tested on Ubuntu 22.04 with X11 (or XWayland) and ALSA/JACK support.
+Other distributions need compatible system audio, X11 and font libraries.
+The Linux presets use Clang/LLD because the vendored resampling library's type
+aliases are rejected by GCC. GitHub Actions runs the audio/control/calibration
+regression tests under a virtual display and checks for missing runtime libraries.
+
 ## Models
 
 Parametric `.nam` models are published as their own releases, separate from the plugin builds, on the
