@@ -253,3 +253,7 @@ Run these checks before merging major changes:
 - Mono-only internal processing.
 - Model load is chooser-only (no drag/drop).
 - Windows build is CI-built but less battle-tested than the macOS path (macOS is the primary dev environment).
+
+Windows standalone builds include ASIO alongside WASAPI and DirectSound. Select
+ASIO in the audio settings, then choose the interface driver. The interface must
+have its own compatible 64-bit ASIO driver installed.

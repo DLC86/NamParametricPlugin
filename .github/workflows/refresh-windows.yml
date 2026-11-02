@@ -1,0 +1,34 @@
+name: Refresh Windows assets for existing 0.4.1 release
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: choco install ninja -y
+      - uses: ilammy/msvc-dev-cmd@v1
+      - run: cmake --preset windows-release -DNAM_PARAMETRIC_BUILD_TESTS=ON
+      - run: cmake --build --preset windows-release --parallel 3 --target NamParametricPlugin_Standalone NamParametricPlugin_VST3 static_export_test
+      - name: Verify ASIO backend, audio, calibration and export
+        run: ctest --test-dir build/windows-release --output-on-failure -R '^static_export$'
+      - name: Replace only the Windows packages in the existing release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = gh api repos/$env:GH_REPO/releases/tags/v0.4.1 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $release.draft -or $release.tag_name -ne 'v0.4.1') { throw 'Expected existing published 0.4.1 release' }
+          if (-not (Select-String -Path CMakeLists.txt -SimpleMatch 'VERSION 0.4.1)')) { throw 'Wrong binary version' }
+          $root = 'build/windows-release/NamParametricPlugin_artefacts/Release'
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path "$root/Standalone/NAM Parametric Plugin.exe", "$root/Standalone/THIRD-PARTY-NOTICES.md" -DestinationPath dist/NAM-Parametric-Plugin-0.4.1-Windows-Standalone.zip
+          Compress-Archive -Path "$root/VST3/NAM Parametric Plugin.vst3" -DestinationPath dist/NAM-Parametric-Plugin-0.4.1-Windows-VST3.zip
+          gh release upload v0.4.1 dist/NAM-Parametric-Plugin-0.4.1-Windows-Standalone.zip dist/NAM-Parametric-Plugin-0.4.1-Windows-VST3.zip --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Asset replacement failed' }

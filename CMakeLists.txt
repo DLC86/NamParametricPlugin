@@ -121,6 +121,11 @@ juce_add_plugin(${TARGET_NAME}
 
 juce_generate_juce_header(${TARGET_NAME})
 
+if(WIN32)
+  # JUCE disables ASIO by default. Propagate this to the standalone wrapper too.
+  target_compile_definitions(${TARGET_NAME} PUBLIC JUCE_ASIO=1)
+endif()
+
 target_sources(${TARGET_NAME} PRIVATE
   Source/DSP/IrEngine.cpp
   Source/DSP/IrEngine.h

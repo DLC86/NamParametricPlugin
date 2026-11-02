@@ -5,6 +5,7 @@
 #include <iostream>
 #include <limits>
 #include <stdexcept>
+#include <juce_audio_devices/juce_audio_devices.h>
 
 #include "NamParametricPluginProcessor.h"
 #include "UI/ModelBarComponent.h"
@@ -322,6 +323,13 @@ void TestSnapshotAndFiles(const std::filesystem::path& directory) {
 int main(int argc, const char* const* argv) {
   try {
     juce::ScopedJuceInitialiser_GUI gui;
+#if JUCE_WINDOWS
+    juce::AudioDeviceManager devices;
+    bool asioAvailable = false;
+    for (const auto* type : devices.getAvailableDeviceTypes())
+      asioAvailable = asioAvailable || type->getTypeName() == "ASIO";
+    Check(asioAvailable, "Standalone audio backend must offer ASIO on Windows");
+#endif
     const auto directory = argc > 1
                                ? std::filesystem::path(argv[1])
                                : std::filesystem::temp_directory_path() / "nam-static-export-test";
