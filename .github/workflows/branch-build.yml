@@ -116,7 +116,7 @@ jobs:
       - name: Configure universal build
         run: cmake --preset mac-release -DNAM_PARAMETRIC_BUILD_TESTS=ON
       - name: Build
-        run: cmake --build --preset mac-release --parallel 3
+        run: cmake --build --preset mac-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_AU NamParametricPlugin_Standalone static_export_test
       - name: Verify export, calibration and smooth controls
         run: ctest --test-dir build/mac-release -C Release --output-on-failure -R '^static_export$'
       - name: Package universal bundles
@@ -132,8 +132,6 @@ jobs:
               AU) extension=component ;;
             esac
             bundle="$root/$format/NAM Parametric Plugin.$extension"
-            executable="$bundle/Contents/MacOS/NAM Parametric Plugin"
-            lipo -verify_arch arm64 x86_64 "$executable"
             ditto -c -k --sequesterRsrc --keepParent "$bundle" \
               "dist/NAM-Parametric-Plugin-$version-macOS-$format.zip"
           done
@@ -165,3 +163,21 @@ jobs:
                       if attempt == 2: raise
                       time.sleep(5)
           PY
+      - name: Verify universal executable architectures
+        run: |
+          set -euo pipefail
+          root=build/mac-release/NamParametricPlugin_artefacts/Release
+          for entry in Standalone/app VST3/vst3 AU/component; do
+            format="${entry%/*}"
+            extension="${entry#*/}"
+            executable="$root/$format/NAM Parametric Plugin.$extension/Contents/MacOS/NAM Parametric Plugin"
+            lipo "$executable" -verify_arch arm64 x86_64
+          done
+      - name: Preserve packaged bundles
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: macOS-release-packages
+          path: dist/*.zip
+          if-no-files-found: ignore
