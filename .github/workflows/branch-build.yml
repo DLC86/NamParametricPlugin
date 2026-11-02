@@ -7,6 +7,14 @@ on:
         required: false
         default: ""
         type: string
+      linux_only:
+        description: Build Linux only
+        type: boolean
+        default: false
+      linux_release_tag:
+        description: Optional published release tag to build and attach Linux packages
+        type: string
+        default: ""
   push:
     branches: [codex/hyper-a2-support]
     paths:
@@ -15,7 +23,7 @@ permissions:
   contents: read
 jobs:
   build:
-    if: ${{ !inputs.release_tag }}
+    if: ${{ !inputs.release_tag && !inputs.linux_only && !inputs.linux_release_tag }}
     strategy:
       fail-fast: false
       matrix:
@@ -77,6 +85,15 @@ jobs:
             build/windows-release/NamParametricPlugin_artefacts/Release/Standalone/**
             build/windows-release/NamParametricPlugin_artefacts/Release/VST3/**
           if-no-files-found: error
+  build_linux:
+    if: ${{ !inputs.release_tag }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/linux-build.yml
+    with:
+      source_ref: ${{ inputs.linux_release_tag || github.ref }}
+      release_tag: ${{ inputs.linux_release_tag || '' }}
+      upload_release: ${{ inputs.linux_release_tag != '' }}
   publish_mac:
     if: ${{ inputs.release_tag }}
     permissions:
