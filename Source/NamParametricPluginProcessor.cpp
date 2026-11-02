@@ -152,6 +152,7 @@ NamParametricPluginAudioProcessor::NamParametricPluginAudioProcessor()
   mCalibrateInputParam = mValueTree.getRawParameterValue(ParamIDs::calibrateInput);
   mInputCalibrationParam = mValueTree.getRawParameterValue(ParamIDs::inputCalibration);
   mOutputModeParam = mValueTree.getRawParameterValue(ParamIDs::outputMode);
+  mControlTransitionParam = mValueTree.getRawParameterValue(ParamIDs::controlTransition);
   startTimerHz(30);
 }
 
@@ -210,6 +211,10 @@ void NamParametricPluginAudioProcessor::processBlock(juce::AudioBuffer<float>& b
 
   TryPromoteStagedModel();
   TryPromoteStagedIr();
+  if (mActiveProcessingState != nullptr)
+    mActiveProcessingState->model->SetControlTransition(
+        mControlTransitionParam->load() >= 0.5f ? namparametric::dsp::ControlTransition::Crossfade
+                                                : namparametric::dsp::ControlTransition::Eco);
   ApplyPendingRuntimeParameterChanges();
 
   float inputGainDb = mInputGainParam != nullptr ? mInputGainParam->load() : 0.0f;
@@ -294,6 +299,9 @@ NamParametricPluginAudioProcessor::CreateParameterLayout() {
   params.push_back(std::make_unique<juce::AudioParameterChoice>(
       juce::ParameterID(ParamIDs::outputMode, 1), "Output Mode",
       juce::StringArray{"Raw", "Normalized", "Calibrated", "Auto"}, 3));
+  params.push_back(std::make_unique<juce::AudioParameterChoice>(
+      juce::ParameterID(ParamIDs::controlTransition, 1), "Control smoothing",
+      juce::StringArray{"Eco de-click", "Crossfade"}, 0));
 
   return {params.begin(), params.end()};
 }
@@ -357,6 +365,9 @@ void NamParametricPluginAudioProcessor::StartModelLoad(
   mRequestedRestoredValues = restoredValues;
   LoadRequest request{modelFile, std::move(restoredValues), ++mLatestLoadRequestId, mModelSize,
                       preserveRuntimeParameters};
+  request.transition = mControlTransitionParam->load() >= 0.5f
+                           ? namparametric::dsp::ControlTransition::Crossfade
+                           : namparametric::dsp::ControlTransition::Eco;
   if (mLoadFuture.has_value()) {
     mQueuedLoadRequest = std::move(request);
     mStatusText = "Queued model: " + modelFile.getFileName();
@@ -380,6 +391,7 @@ void NamParametricPluginAudioProcessor::BeginModelLoadLocked(LoadRequest request
     result.preserveRuntimeParameters = loadRequest.preserveRuntimeParameters;
     result.restoredValues = std::move(loadRequest.restoredValues);
     auto model = std::make_unique<namparametric::dsp::NamModelEngine>();
+    model->SetControlTransition(loadRequest.transition);
 
     std::string error;
     if (!model->LoadModel(modelPath, error, loadRequest.size)) {
@@ -909,6 +921,12 @@ void NamParametricPluginAudioProcessor::setStateInformation(const void* data,
     return;
   }
 
+  if (!tree.getChildWithProperty("id", ParamIDs::controlTransition).isValid()) {
+    juce::ValueTree transition("PARAM");
+    transition.setProperty("id", ParamIDs::controlTransition, nullptr);
+    transition.setProperty("value", 0.0f, nullptr);
+    tree.appendChild(transition, nullptr);
+  }
   mValueTree.replaceState(tree);
   {
     std::lock_guard<std::mutex> lock(mLoadMutex);

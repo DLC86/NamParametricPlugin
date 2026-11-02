@@ -88,8 +88,10 @@ To use a model, download a `.nam` file and load it in the plugin (see [Usage Not
   - `Output Gain` (`-12 dB` to `+12 dB`)
 - Model load via file chooser (`.nam`).
 - Dynamic model parameters are generated in the plugin UI and applied at runtime.
-- HyperWaveNet and HyperA2 controls use 50 ms audio crossfades, including switches.
-  Keeping both network histories live costs approximately twice the model DSP CPU.
+- **Control smoothing** in Settings defaults to experimental **Eco de-click** in 0.4.1:
+  one running network and a 5 ms correction of output steps when controls change.
+  **Crossfade** retains the 0.4.0 behavior (two running networks, approximately
+  twice the model DSP CPU) for listening comparisons. The session recalls the choice.
 - **Export NAM...** freezes HyperWaveNet controls into a static WaveNet, or HyperA2
   controls into one static file containing **both Lite and Full**. The suggested
   filename includes the settings; custom metadata records every control name and

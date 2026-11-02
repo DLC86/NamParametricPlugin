@@ -9,6 +9,13 @@ CalibrationSettingsComponent::CalibrationSettingsComponent(
   mTitle.setFont(juce::Font(juce::FontOptions(18.0f, juce::Font::bold)));
   mInputLabel.setText("Input calibration", juce::dontSendNotification);
   mOutputLabel.setText("Output mode", juce::dontSendNotification);
+  mTransitionLabel.setText("Control smoothing", juce::dontSendNotification);
+  mTransitionHelp.setText(
+      "Eco: experimental 5 ms de-click, one running network. Crossfade: 50 ms transitions, "
+      "two running networks and higher CPU. Switch positions stay discrete in both modes.",
+      juce::dontSendNotification);
+  mTransitionHelp.setFont(juce::Font(juce::FontOptions(12.0f)));
+  mTransitionHelp.setColour(juce::Label::textColourId, nam::ui::Colours::textSecondary);
   mHelp.setText(
       "Input calibration is your interface's analog input level at 0 dBFS. "
       "Changing it adjusts model drive only. Calibrated output is referenced when "
@@ -20,8 +27,10 @@ CalibrationSettingsComponent::CalibrationSettingsComponent(
   mInput.setTextValueSuffix(" dBu");
   mInput.setTextBoxStyle(juce::Slider::TextBoxRight, false, 85, 24);
   mOutput.addItemList({"Raw", "Normalized", "Calibrated", "Auto"}, 1);
+  mTransition.addItemList({"Eco de-click (1 network)", "Crossfade (2 networks)"}, 1);
   for (auto* child : std::initializer_list<juce::Component*>{
-           &mTitle, &mInputLabel, &mOutputLabel, &mHelp, &mEnabled, &mInput, &mOutput}) {
+           &mTitle, &mInputLabel, &mOutputLabel, &mHelp, &mEnabled, &mInput, &mOutput,
+           &mTransitionLabel, &mTransition, &mTransitionHelp}) {
     addAndMakeVisible(child);
   }
   using IDs = NamParametricPluginAudioProcessor::ParamIDs;
@@ -31,7 +40,9 @@ CalibrationSettingsComponent::CalibrationSettingsComponent(
       state, IDs::inputCalibration, mInput);
   mOutputAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
       state, IDs::outputMode, mOutput);
-  setSize(360, 235);
+  mTransitionAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+      state, IDs::controlTransition, mTransition);
+  setSize(420, 345);
 }
 
 void CalibrationSettingsComponent::paint(juce::Graphics& g) {
@@ -49,5 +60,10 @@ void CalibrationSettingsComponent::resized() {
   mOutputLabel.setBounds(output.removeFromLeft(125));
   mOutput.setBounds(output.reduced(0, 3));
   bounds.removeFromTop(8);
-  mHelp.setBounds(bounds);
+  mHelp.setBounds(bounds.removeFromTop(76));
+  auto transition = bounds.removeFromTop(32);
+  mTransitionLabel.setBounds(transition.removeFromLeft(125));
+  mTransition.setBounds(transition.reduced(0, 3));
+  bounds.removeFromTop(6);
+  mTransitionHelp.setBounds(bounds);
 }

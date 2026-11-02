@@ -313,6 +313,17 @@ void NamModelEngine::Reset(double sampleRate, int maxBlockSize) {
       std::max(2, static_cast<int>(std::lround(GetModelSampleRateForProcessing() * 0.050)));
   mFadePosition = 0;
   mFading = false;
+  mActiveTransition = mRequestedTransition;
+  mStandbyWarmup = 0;
+  const double rate = GetModelSampleRateForProcessing();
+  mCorrectionLength = std::max(2, static_cast<int>(std::lround(rate * 0.005)));
+  mCorrectionPosition = mCorrectionLength;
+  mRawHistory = mPredictionSkip = 0;
+  mOutputHistory = 0;
+  mLastOutput = mPreviousOutput = 0.0f;
+  mCorrectionStart = mLastRaw = mPreviousRaw = mPredictionError = mRawPeak = 0.0f;
+  mErrorDecay = static_cast<float>(std::exp(-1.0 / (rate * 0.010)));
+  mPeakDecay = static_cast<float>(std::exp(-1.0 / (rate * 0.050)));
   if (mTransitionControl != nullptr) {
     mParametricControl->SetParams(mParameterValues);
     mTransitionControl->SetParams(mParameterValues);
@@ -349,12 +360,69 @@ void NamModelEngine::Reset(double sampleRate, int maxBlockSize) {
 }
 
 void NamModelEngine::ProcessModel(float* input, float* output, int numSamples) {
+  if (numSamples <= 0) return;
+  ProcessModelInternal(input, output, numSamples);
+  if (numSamples >= 2) {
+    mPreviousOutput = output[numSamples - 2];
+    mLastOutput = output[numSamples - 1];
+    mOutputHistory = 2;
+  } else if (numSamples == 1) {
+    mPreviousOutput = mLastOutput;
+    mLastOutput = output[0];
+    mOutputHistory = std::min(2, mOutputHistory + 1);
+  }
+}
+
+void NamModelEngine::ProcessModelInternal(float* input, float* output, int numSamples) {
   if (!mTransitionModel) {
     mModel->process(&input, &output, numSamples);
     return;
   }
+  if (mRequestedTransition != mActiveTransition && !mFading &&
+      mCorrectionPosition >= mCorrectionLength) {
+    mActiveTransition = mRequestedTransition;
+    mRawHistory = mPredictionSkip = 0;
+    mPredictionError = mRawPeak = 0.0f;
+    mStandbyWarmup = 0;
+    if (mActiveTransition == ControlTransition::Eco) {
+      mLastRaw = mLastOutput;
+      mPreviousRaw = mPreviousOutput;
+      mRawHistory = mOutputHistory;
+      mRawPeak = std::max(std::abs(mLastRaw), std::abs(mPreviousRaw));
+      mPredictionError = 2.0f * std::abs(mLastRaw - mPreviousRaw);
+    }
+    if (mActiveTransition == ControlTransition::Crossfade) {
+      // The standby was asleep in Eco. Rebuild its history inaudibly at the
+      // current controls before letting it take part in a parameter crossfade.
+      mTransitionControl->SetParams(mRenderedValues);
+      mStandbyWarmup = std::max(1, mTransitionModel->GetPrewarmSamples());
+    }
+  }
+  if (mActiveTransition == ControlTransition::Eco) {
+    ProcessEco(input, output, numSamples);
+    return;
+  }
   int offset = 0;
   while (offset < numSamples) {
+    if (!mFading && mRequestedTransition == ControlTransition::Eco) {
+      // Finish the current fade, then hand over on the next call. Do not
+      // start another queued fade and starve a mode change during automation.
+      auto* in = input + offset;
+      auto* out = output + offset;
+      mModel->process(&in, &out, numSamples - offset);
+      return;
+    }
+    if (mStandbyWarmup > 0) {
+      const int count = std::min(numSamples - offset, mStandbyWarmup);
+      auto* in = input + offset;
+      auto* out = output + offset;
+      auto* alternate = mTransitionOutput.data();
+      mTransitionModel->process(&in, &alternate, count);
+      mModel->process(&in, &out, count);
+      mStandbyWarmup -= count;
+      offset += count;
+      continue;
+    }
     if (!mFading && mParameterValues != mRenderedValues) {
       mTransitionControl->SetParams(mParameterValues);
       std::copy(mParameterValues.begin(), mParameterValues.end(), mRenderedValues.begin());
@@ -383,6 +451,55 @@ void NamModelEngine::ProcessModel(float* input, float* output, int numSamples) {
       }
     }
     offset += count;
+  }
+}
+
+void NamModelEngine::ProcessEco(float* input, float* output, int numSamples) {
+  const bool changed =
+      mRequestedTransition == ControlTransition::Eco && mParameterValues != mRenderedValues;
+  if (changed) {
+    mParametricControl->SetParams(mParameterValues);
+    std::copy(mParameterValues.begin(), mParameterValues.end(), mRenderedValues.begin());
+  }
+  mModel->process(&input, &output, numSamples);
+  for (int i = 0; i < numSamples; ++i) {
+    const float raw = output[i];
+    const float prediction = 2.0f * mLastRaw - mPreviousRaw;
+    const float peak = std::max(mRawPeak, std::abs(raw));
+    if (changed && i == 0) {
+      if (mRawHistory >= 2) {
+        const float jump = raw - prediction;
+        // Ignore residuals within the signal's ordinary prediction error. This
+        // avoids treating the curvature of an unchanged high-frequency tone as
+        // a control click. Never feed the corrected audio back into this detector.
+        const float excess = std::max(0.0f, std::abs(jump) - 2.0f * mPredictionError);
+        if (excess > 1e-12f) {
+          float tail = 0.0f;
+          if (mCorrectionPosition < mCorrectionLength) {
+            const float t = static_cast<float>(mCorrectionPosition) / (mCorrectionLength - 1);
+            tail = mCorrectionStart * (1.0f - t * t * (3.0f - 2.0f * t));
+          }
+          mCorrectionStart =
+              std::clamp(tail - std::copysign(excess, jump), -2.0f * peak, 2.0f * peak);
+          mCorrectionPosition = 0;
+        }
+      }
+      mPredictionSkip = 2;
+    }
+    if (mPredictionSkip > 0)
+      --mPredictionSkip;
+    else if (mRawHistory >= 2)
+      mPredictionError = std::max(std::abs(raw - prediction), mPredictionError * mErrorDecay);
+    mRawPeak = std::max(std::abs(raw), mRawPeak * mPeakDecay);
+    if (mCorrectionPosition < mCorrectionLength) {
+      const float t = static_cast<float>(mCorrectionPosition++) / (mCorrectionLength - 1);
+      const float correction = mCorrectionStart * (1.0f - t * t * (3.0f - 2.0f * t));
+      // Only bound the correction transient; raw model audio is never limited.
+      output[i] = std::clamp(raw + correction, -peak, peak);
+    }
+    mPreviousRaw = mLastRaw;
+    mLastRaw = raw;
+    mRawHistory = std::min(2, mRawHistory + 1);
   }
 }
 

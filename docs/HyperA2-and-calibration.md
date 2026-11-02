@@ -73,6 +73,46 @@ compression/distortion; this is independent of the output gain correction.
 
 ## Smooth HyperWaveNet / HyperA2 controls
 
+### 0.4.1 Eco de-click
+
+Settings > **Control smoothing** now defaults to **Eco de-click** for new instances
+and sessions without a saved mode. Only one audio network processes audio. The
+standby instance remains allocated for mode comparison but is not run in Eco.
+The implementation adds no lookahead or audio latency.
+
+At a committed control change the model installs the destination weights once.
+A short linear predictor estimates the boundary step. Residuals inside the
+signal's normal prediction-error envelope are ignored, avoiding false corrections
+on ordinary high-frequency audio. A detected excess is subtracted with a finite
+5 ms smoothstep tail at the model sample rate, ahead of resampling. Rapid updates
+carry the remaining correction into the next tail. The transient is bounded by
+the recent raw-audio peak; uncorrected model audio is never limited or filtered.
+
+This is an experimental, inexpensive de-click, not a continuous interpolation of
+the complete nonlinear transfer function. Changes deeper in the convolution
+history and large timbral moves may still be audible. **Crossfade** remains
+selectable for comparison. It finishes a fade already in flight before entering
+Eco; entering Crossfade first warms the sleeping standby inaudibly at the current
+controls. Parameter changes during that short warmup are queued. Reset settles
+immediately on the committed controls and clears correction tails.
+
+Tests cover Eco's response to steps, rapid mixed knob/switch updates, both model
+sizes, odd and large buffers, resampling, mode changes, exact settled response and
+an unchanged audio signal while irrelevant controls move. Runtime probes compare
+raw, Eco and Crossfade with identical models, plus raw/Eco at the same control
+update rate. Session/UI tests cover the saved mode and the Eco initial setting.
+
+Indicative local measurement, 2026-11-02, Windows Release build on an Intel
+Core i7-12700H: the deterministic 3-channel fixture, 400 blocks of 257 samples,
+48 kHz, no IR or device I/O. Raw network: 105.5 ms; Eco: 112.1 ms (1.06x);
+Crossfade: 218.2 ms (2.07x). At the same moving-control update rate, raw took
+111.0 ms and Eco 114.5 ms (1.03x). These short probes are not a promise for
+every CPU/model or a listening-quality assessment; the test prints reproducible
+comparisons on each build machine. On the DC-step fixtures Eco reduced the
+largest adjacent-sample change to approximately 0.0063 of the hard step.
+
+### Crossfade mode (0.4.0 behavior)
+
 Both architectures use a 50 ms, per-sample smoothstep crossfade between two
 audio networks at valid control settings. New weights are installed only in
 the currently inaudible network. Both receive the same incoming audio, so

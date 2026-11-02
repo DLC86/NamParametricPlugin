@@ -12,6 +12,7 @@ namespace namparametric::dsp {
 
 enum class ModelSize { Full, Lite };
 enum class OutputMode { Raw, Normalized, Calibrated, Auto };
+enum class ControlTransition { Eco, Crossfade };
 
 struct ModelParameterInfo {
   std::string name;
@@ -49,12 +50,15 @@ class NamModelEngine {
   [[nodiscard]] const std::vector<ModelParameterInfo>& GetParameterInfos() const;
   [[nodiscard]] const std::vector<float>& GetParameterValues() const;
   bool SetParameterValues(std::span<const float> values) noexcept;
+  void SetControlTransition(ControlTransition mode) noexcept { mRequestedTransition = mode; }
 
  private:
   struct ResamplerState;
   [[nodiscard]] double GetModelSampleRateForProcessing() const;
   [[nodiscard]] bool NeedToResample() const;
   void ProcessModel(float* input, float* output, int numSamples);
+  void ProcessModelInternal(float* input, float* output, int numSamples);
+  void ProcessEco(float* input, float* output, int numSamples);
 
   std::unique_ptr<nam::DSP> mModel;
   // Both histories keep receiving the same audio. Only the inaudible network
@@ -65,6 +69,16 @@ class NamModelEngine {
   int mFadePosition = 0;
   int mFadeLength = 0;
   bool mFading = false;
+  ControlTransition mRequestedTransition = ControlTransition::Crossfade;
+  ControlTransition mActiveTransition = ControlTransition::Crossfade;
+  int mStandbyWarmup = 0;
+  int mCorrectionLength = 0, mCorrectionPosition = 0;
+  int mRawHistory = 0, mPredictionSkip = 0;
+  float mCorrectionStart = 0.0f, mLastRaw = 0.0f, mPreviousRaw = 0.0f;
+  float mPredictionError = 0.0f, mRawPeak = 0.0f;
+  float mErrorDecay = 0.0f, mPeakDecay = 0.0f;
+  float mLastOutput = 0.0f, mPreviousOutput = 0.0f;
+  int mOutputHistory = 0;
   std::shared_ptr<const nlohmann::json> mExportSource;
   bool mSupportsSizeSelection = false;
   ModelSize mModelSize = ModelSize::Full;

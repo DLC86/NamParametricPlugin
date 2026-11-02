@@ -22,10 +22,13 @@ jobs:
         run: brew install ninja
 
       - name: Configure
-        run: cmake --preset mac-release -DNAM_PARAMETRIC_BUILD_TESTS=OFF
+        run: cmake --preset mac-release -DNAM_PARAMETRIC_BUILD_TESTS=ON
 
       - name: Build
-        run: cmake --build --preset mac-release -j $(sysctl -n hw.ncpu)
+        run: cmake --build --preset mac-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_AU NamParametricPlugin_Standalone static_export_test
+
+      - name: Verify audio, calibration and control smoothing
+        run: ctest --test-dir build/mac-release --output-on-failure -R '^static_export$'
 
       - name: Package artifacts
         run: |
@@ -68,10 +71,13 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Configure
-        run: cmake --preset windows-release -DNAM_PARAMETRIC_BUILD_TESTS=OFF
+        run: cmake --preset windows-release -DNAM_PARAMETRIC_BUILD_TESTS=ON
 
       - name: Build
-        run: cmake --build --preset windows-release
+        run: cmake --build --preset windows-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_Standalone static_export_test
+
+      - name: Verify audio, calibration and control smoothing
+        run: ctest --test-dir build/windows-release --output-on-failure -R '^static_export$'
 
       - name: Package artifacts
         shell: pwsh
@@ -116,5 +122,6 @@ jobs:
           gh release create "${{ github.ref_name }}" \
             dist/*.zip dist/*.tar.gz \
             --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
             --title "NAM Parametric Plugin ${{ github.ref_name }}" \
-            --notes "Windows x64, macOS universal (arm64 + x86_64) and Linux x86_64 builds. Linux packages contain VST3 and standalone builds tested on Ubuntu 22.04. See the README for installation instructions. Windows and macOS binaries are unsigned."
+            --notes "Eco de-click is now the initial Control smoothing setting: one running audio network and an experimental 5 ms correction of control-induced output steps. Settings also offers the previous Crossfade mode for comparison (two running networks, higher CPU). The selection is recalled with the session; Full remains the initial HyperA2 size. Windows x64, macOS universal (arm64 + x86_64) and Linux x86_64 packages. Audio, calibration, export and control-transition tests run on all three platforms. Linux builds are tested on Ubuntu 22.04. See the README for installation instructions. Windows and macOS binaries are unsigned."

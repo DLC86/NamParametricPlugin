@@ -10,6 +10,7 @@
 
 #include "NamParametricPluginProcessor.h"
 #include "get_dsp.h"
+#include "wavenet/hyperwavenet.h"
 
 namespace {
 using namparametric::dsp::ModelSize;
@@ -116,6 +117,95 @@ void Set(NamParametricPluginAudioProcessor& processor, const char* id, float pla
   parameter->setValueNotifyingHost(parameter->convertTo0to1(plain));
 }
 
+void TestEco(const std::filesystem::path& path, ModelSize size, double rate, int block) {
+  using namparametric::dsp::ControlTransition;
+  NamModelEngine eco, reference;
+  std::string error;
+  eco.SetControlTransition(ControlTransition::Eco);
+  reference.SetControlTransition(ControlTransition::Eco);
+  Check(eco.LoadModel(path.string(), error, size), error.c_str());
+  Check(reference.LoadModel(path.string(), error, size), error.c_str());
+  eco.Reset(rate, block);
+  const float before = Render(eco, 16000, block).back();
+  const std::vector<float> destination{9, 1, 2};
+  Check(eco.SetParameterValues(destination), "Eco destination rejected");
+  const auto moved = Render(eco, 16000, block);
+  Check(reference.SetParameterValues(destination), "Reference destination rejected");
+  reference.Reset(rate, block);
+  const auto expected = Render(reference, 32000, block).back();
+  Check(std::abs(moved.back() - expected) < 1e-6f, "Eco did not reach the unmodified model");
+  const float difference = std::abs(expected - before);
+  if (rate == 48000) {
+    float maxStep = std::abs(moved.front() - before);
+    for (size_t i = 1; i < moved.size(); ++i)
+      maxStep = std::max(maxStep, std::abs(moved[i] - moved[i - 1]));
+    Check(maxStep < difference * 0.03f, "Eco left a hard step on the DC control fixture");
+    std::cout << "Eco rate=" << rate << " block=" << block
+              << " maximum step/hard jump=" << maxStep / difference << '\n';
+  }
+  // Switching to a sleeping standby must not expose its stale history.
+  eco.SetControlTransition(ControlTransition::Crossfade);
+  const auto switched = Render(eco, 32000, block);
+  Check(std::abs(switched.back() - expected) < 1e-6f, "Mode change lost the current controls");
+  eco.SetParameterValues(std::vector<float>{1, 0, 1});
+  Render(eco, 23, block);
+  eco.SetControlTransition(ControlTransition::Eco);
+  for (int i = 0; i < 19; ++i) {
+    eco.SetParameterValues(std::vector<float>{static_cast<float>(i % 11), static_cast<float>(i % 2),
+                                              static_cast<float>(i % 3)});
+    Render(eco, 37, block);
+  }
+  const auto latest = eco.GetParameterValues();
+  const auto settled = Render(eco, 32000, block).back();
+  reference.SetParameterValues(latest);
+  reference.Reset(rate, block);
+  Check(std::abs(Render(reference, 32000, block).back() - settled) < 1e-6f,
+        "Eco rapid moves/mode change lost the final control vector");
+}
+
+void TestEcoUnaffectedSignal(const std::filesystem::path& directory, Json hyper) {
+  // Zero the hypernetwork, leaving the audio base intact. Knob movement now
+  // changes no weights: the de-click must not invent a transient on ordinary audio.
+  auto config = nam::wavenet::create_hyperwavenet_config(hyper.at("config"), 48000);
+  const auto& typed = dynamic_cast<const nam::wavenet::HyperWaveNetConfig&>(*config);
+  const auto count = nam::Hypernetwork::SerializedStateCount(typed.hypernet, typed.params);
+  for (size_t i = hyper["weights"].size() - count; i < hyper["weights"].size(); ++i)
+    hyper["weights"][i] = 0.0;
+  const auto path = directory / "eco_unchanged.nam";
+  {
+    std::ofstream stream(path);
+    stream << hyper;
+  }
+  NamModelEngine eco;
+  eco.SetControlTransition(namparametric::dsp::ControlTransition::Eco);
+  std::string error;
+  Check(eco.LoadModel(path.string(), error), error.c_str());
+  eco.Reset(48000, 257);
+  auto raw = nam::get_dsp(hyper);
+  raw->Reset(48000, 257);
+  float input[257]{}, actual[257]{}, expected[257]{};
+  double maximum = 0;
+  for (int block = 0; block < 200; ++block) {
+    if (block > 20 && block % 2 == 0)
+      eco.SetParameterValues(std::vector<float>{static_cast<float>(block % 11),
+                                                static_cast<float>(block % 2),
+                                                static_cast<float>(block % 3)});
+    for (int i = 0; i < 257; ++i) {
+      const double t = static_cast<double>(block * 257 + i) / 48000;
+      input[i] = static_cast<float>(0.3 * std::sin(t * 6.283185307179586 * 997) +
+                                    0.2 * std::sin(t * 6.283185307179586 * 12000));
+    }
+    auto* in = input;
+    auto* out = expected;
+    raw->process(&in, &out, 257);
+    eco.Process(input, actual, 257);
+    for (int i = 0; i < 257; ++i)
+      maximum = std::max(maximum, std::abs(static_cast<double>(actual[i]) - expected[i]));
+  }
+  Check(maximum < 1e-6, "Eco modified audio when the controls had no audible effect");
+  std::cout << "Eco unaffected signal max error=" << maximum << '\n';
+}
+
 float ProcessSilence(NamParametricPluginAudioProcessor& processor, int blocks = 1) {
   juce::AudioBuffer<float> audio(2, 257);
   juce::MidiBuffer midi;
@@ -157,6 +247,25 @@ void TestLiveCalibration(const std::filesystem::path& path) {
             engine.GetInputCalibrationGainDb(18, true) == 0 &&
             engine.GetInputCalibrationGainDb(24, true) == 6,
         "Input calibration sign or live response is incorrect");
+  Check(processor.mValueTree.getRawParameterValue("controlTransition")->load() == 0.0f,
+        "New processors must start in Eco");
+  Set(processor, "controlTransition", 1);
+  juce::MemoryBlock state;
+  processor.getStateInformation(state);
+  NamParametricPluginAudioProcessor restored;
+  restored.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+  Check(restored.mValueTree.getRawParameterValue("controlTransition")->load() == 1.0f,
+        "Crossfade selection was not recalled");
+  auto xml =
+      juce::AudioProcessor::getXmlFromBinary(state.getData(), static_cast<int>(state.getSize()));
+  auto legacy = juce::ValueTree::fromXml(*xml);
+  legacy.removeChild(legacy.getChildWithProperty("id", "controlTransition"), nullptr);
+  juce::MemoryBlock oldState;
+  auto oldXml = legacy.createXml();
+  juce::AudioProcessor::copyXmlToBinary(*oldXml, oldState);
+  restored.setStateInformation(oldState.getData(), static_cast<int>(oldState.getSize()));
+  Check(restored.mValueTree.getRawParameterValue("controlTransition")->load() == 0.0f,
+        "Sessions without a saved smoothing mode must migrate to Eco");
 }
 }  // namespace
 
@@ -173,9 +282,13 @@ void TestControlTransitions(const std::filesystem::path& directory, const Json& 
       for (const int block : {37, 257, 2048}) TestTransition(path, size, 48000, block);
       TestTransition(path, size, 44100, 257);
       TestTransition(path, size, 96000, 257);
+      for (const int block : {37, 257, 2048}) TestEco(path, size, 48000, block);
+      TestEco(path, size, 44100, 257);
+      TestEco(path, size, 96000, 257);
     }
     TestLiveCalibration(path);
   }
+  TestEcoUnaffectedSignal(directory, hyper);
   // Cost probe uses the same HyperWaveNet, audio and block size for raw core
   // and plugin smoothing. Report, rather than assert, machine-dependent timing.
   auto raw = nam::get_dsp(hyper);
@@ -184,11 +297,27 @@ void TestControlTransitions(const std::filesystem::path& directory, const Json& 
   std::string error;
   Check(engine.LoadModel((directory / "transition_hyper.nam").string(), error), error.c_str());
   engine.Reset(48000, 257);
+  NamModelEngine eco;
+  eco.SetControlTransition(namparametric::dsp::ControlTransition::Eco);
+  Check(eco.LoadModel((directory / "transition_hyper.nam").string(), error), error.c_str());
+  eco.Reset(48000, 257);
   float input[257]{}, output[257]{};
-  const auto measure = [&](bool smooth) {
+  const auto measure = [&](int mode, bool moving = false) {
     const auto start = std::chrono::steady_clock::now();
     for (int i = 0; i < 400; ++i) {
-      if (smooth)
+      if (moving && i % 3 == 0) {
+        const std::vector<float> values{static_cast<float>(i % 11), static_cast<float>(i % 2),
+                                        static_cast<float>(i % 3)};
+        if (mode == 0)
+          dynamic_cast<nam::IParametricControl&>(*raw).SetParams(values);
+        else if (mode == 2)
+          eco.SetParameterValues(values);
+        else
+          engine.SetParameterValues(values);
+      }
+      if (mode == 2)
+        eco.Process(input, output, 257);
+      else if (mode == 1)
         engine.Process(input, output, 257);
       else {
         float* in = input;
@@ -199,10 +328,16 @@ void TestControlTransitions(const std::filesystem::path& directory, const Json& 
     return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
         .count();
   };
-  const auto rawMs = measure(false);
-  const auto smoothMs = measure(true);
+  const auto rawMs = measure(0);
+  const auto smoothMs = measure(1);
+  const auto ecoMs = measure(2);
   std::cout << "400 x 257 samples, raw=" << rawMs << " ms, smooth=" << smoothMs
-            << " ms, cost ratio=" << smoothMs / rawMs << '\n';
+            << " ms, eco=" << ecoMs << " ms; crossfade/raw=" << smoothMs / rawMs
+            << ", eco/raw=" << ecoMs / rawMs << '\n';
+  const auto movingRaw = measure(0, true);
+  const auto movingEco = measure(2, true);
+  std::cout << "Moving controls: raw=" << movingRaw << " ms, eco=" << movingEco
+            << " ms, eco/raw=" << movingEco / movingRaw << '\n';
   // Metadata parity with NAM Oversampler: case-insensitive gear and old return keys.
   for (const char* key : {"return_level", "return_level_dbu"}) {
     auto legacy = hyper;
