@@ -1,6 +1,7 @@
 #include "DSP/NamModelEngine.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -223,6 +224,7 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
       config = std::move(child);
     }
     auto loadedModel = nam::get_dsp(config);
+    auto transitionModel = exportSource ? nam::get_dsp(config) : nullptr;
     if (loadedModel == nullptr) {
       errorMessage = "Model loader returned null model.";
       return false;
@@ -262,8 +264,29 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
     if (config.contains("metadata") && config["metadata"].is_object() &&
         config["metadata"].contains("gear_type") && config["metadata"]["gear_type"].is_string()) {
       gearType = config["metadata"]["gear_type"].get<std::string>();
+      std::transform(gearType.begin(), gearType.end(), gearType.begin(),
+                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    }
+    // Match NAM Oversampler's legacy return-level metadata fallback.
+    if (!loadedModel->HasOutputLevel() && config.contains("metadata") &&
+        config["metadata"].is_object()) {
+      for (const auto* key : {"return_level", "return_level_dbu"}) {
+        const auto& metadata = config["metadata"];
+        if (metadata.contains(key) && metadata[key].is_number()) {
+          const double level = metadata[key].get<double>();
+          if (std::isfinite(level)) {
+            loadedModel->SetOutputLevel(level);
+            if (transitionModel) transitionModel->SetOutputLevel(level);
+          }
+          break;
+        }
+      }
     }
     mModel = std::move(loadedModel);
+    mTransitionModel = std::move(transitionModel);
+    mTransitionControl = dynamic_cast<nam::IParametricControl*>(mTransitionModel.get());
+    mRenderedValues = loadedValues;
+    mFading = false;
     mExportSource = std::move(exportSource);
     mGearType = std::move(gearType);
     mSupportsSizeSelection = supportsSizeSelection;
@@ -286,10 +309,23 @@ void NamModelEngine::Reset(double sampleRate, int maxBlockSize) {
 
   mHostSampleRate = sampleRate;
   mMaxExternalBlockSize = maxBlockSize;
+  mFadeLength =
+      std::max(2, static_cast<int>(std::lround(GetModelSampleRateForProcessing() * 0.050)));
+  mFadePosition = 0;
+  mFading = false;
+  if (mTransitionControl != nullptr) {
+    mParametricControl->SetParams(mParameterValues);
+    mTransitionControl->SetParams(mParameterValues);
+    std::copy(mParameterValues.begin(), mParameterValues.end(), mRenderedValues.begin());
+  }
 
   if (!NeedToResample()) {
     mResamplerState.reset();
     mModel->Reset(sampleRate, maxBlockSize);
+    if (mTransitionModel) {
+      mTransitionOutput.resize(static_cast<size_t>(maxBlockSize));
+      mTransitionModel->Reset(sampleRate, maxBlockSize);
+    }
     return;
   }
 
@@ -297,7 +333,7 @@ void NamModelEngine::Reset(double sampleRate, int maxBlockSize) {
   mResamplerState = std::make_unique<ResamplerState>(modelSampleRate);
   mResamplerState->blockProcessFunc = [this](NAM_SAMPLE** input, NAM_SAMPLE** output,
                                              int numFrames) {
-    mModel->process(input, output, numFrames);
+    ProcessModel(input[0], output[0], numFrames);
   };
   mResamplerState->resampler.Reset(sampleRate, maxBlockSize);
 
@@ -306,6 +342,48 @@ void NamModelEngine::Reset(double sampleRate, int maxBlockSize) {
   const int maxEncapsulatedBlockSize =
       std::max(1, static_cast<int>(std::ceil(static_cast<double>(maxBlockSize) / upRatio)));
   mModel->Reset(sampleRate, maxEncapsulatedBlockSize);
+  if (mTransitionModel) {
+    mTransitionOutput.resize(static_cast<size_t>(maxEncapsulatedBlockSize));
+    mTransitionModel->Reset(sampleRate, maxEncapsulatedBlockSize);
+  }
+}
+
+void NamModelEngine::ProcessModel(float* input, float* output, int numSamples) {
+  if (!mTransitionModel) {
+    mModel->process(&input, &output, numSamples);
+    return;
+  }
+  int offset = 0;
+  while (offset < numSamples) {
+    if (!mFading && mParameterValues != mRenderedValues) {
+      mTransitionControl->SetParams(mParameterValues);
+      std::copy(mParameterValues.begin(), mParameterValues.end(), mRenderedValues.begin());
+      mFadePosition = 0;
+      mFading = true;
+    }
+    const int count =
+        mFading ? std::min(numSamples - offset, mFadeLength - mFadePosition) : numSamples - offset;
+    auto* in = input + offset;
+    auto* out = output + offset;
+    auto* alternate = mTransitionOutput.data();
+    // Standby first also makes an in-place Process(input, input) safe.
+    mTransitionModel->process(&in, &alternate, count);
+    mModel->process(&in, &out, count);
+    if (mFading) {
+      for (int i = 0; i < count; ++i) {
+        const float t = static_cast<float>(mFadePosition + i) / (mFadeLength - 1);
+        const float mix = t * t * (3.0f - 2.0f * t);
+        out[i] = (1.0f - mix) * out[i] + mix * alternate[i];
+      }
+      mFadePosition += count;
+      if (mFadePosition == mFadeLength) {
+        mModel.swap(mTransitionModel);
+        std::swap(mParametricControl, mTransitionControl);
+        mFading = false;
+      }
+    }
+    offset += count;
+  }
 }
 
 void NamModelEngine::Process(float* input, float* output, int numSamples) {
@@ -322,7 +400,7 @@ void NamModelEngine::Process(float* input, float* output, int numSamples) {
   NAM_SAMPLE* outputPtrs[1] = {output};
 
   if (!NeedToResample() || mResamplerState == nullptr) {
-    mModel->process(inputPtrs, outputPtrs, numSamples);
+    ProcessModel(input, output, numSamples);
     return;
   }
 
@@ -371,7 +449,19 @@ bool NamModelEngine::SetParameterValues(const std::span<const float> values) noe
     return false;
   }
   try {
-    mParametricControl->SetParams(values);
+    if (mTransitionControl != nullptr) {
+      // Validate before publishing a destination. Never interpolate switch indices
+      // or their one-hot encoding; each network sees an actual switch position.
+      for (size_t i = 0; i < values.size(); ++i) {
+        if (!std::isfinite(values[i])) return false;
+        const auto& info = mParameterInfos[i];
+        if (info.IsSwitch() && (std::round(values[i]) != values[i] || values[i] < 0 ||
+                                values[i] >= static_cast<float>(info.enumNames.size())))
+          return false;
+      }
+    } else {
+      mParametricControl->SetParams(values);
+    }
     std::copy(values.begin(), values.end(), mParameterValues.begin());
     return true;
   } catch (...) {

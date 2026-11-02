@@ -37,7 +37,7 @@ jobs:
         run: cmake --preset ${{ matrix.preset }} -DNAM_PARAMETRIC_BUILD_TESTS=ON
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} --parallel 3
-      - name: Verify static NAM export
+      - name: Verify export, calibration and smooth controls
         run: ctest --test-dir build/${{ matrix.preset }} -C Release --output-on-failure -R "^static_export$"
       - name: Upload export validation files
         if: always()

@@ -259,6 +259,7 @@ if(NAM_PARAMETRIC_BUILD_TESTS)
   target_link_libraries(hyper_a2_processor_test PRIVATE ${TARGET_NAME} juce::juce_audio_utils juce::juce_dsp)
   juce_add_console_app(static_export_test PRODUCT_NAME "Static NAM Export Test")
   target_sources(static_export_test PRIVATE Tests/StaticExportTest.cpp
+    Tests/ControlTransitionTest.cpp
     $<TARGET_OBJECTS:nam_core_runtime>)
   target_include_directories(static_export_test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/Source)
   target_include_directories(static_export_test SYSTEM PRIVATE ${AUDIODSPTOOLS_DIR} ${NAM_CORE_DIR}

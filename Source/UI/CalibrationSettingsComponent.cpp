@@ -11,7 +11,8 @@ CalibrationSettingsComponent::CalibrationSettingsComponent(
   mOutputLabel.setText("Output mode", juce::dontSendNotification);
   mHelp.setText(
       "Input calibration is your interface's analog input level at 0 dBFS. "
-      "Calibration is applied only when the model supplies the matching metadata.",
+      "Changing it adjusts model drive only. Calibrated output is referenced when "
+      "loading a model or changing Output mode/level, as in NAM Oversampler.",
       juce::dontSendNotification);
   mHelp.setFont(juce::Font(juce::FontOptions(12.0f)));
   mHelp.setColour(juce::Label::textColourId, nam::ui::Colours::textSecondary);

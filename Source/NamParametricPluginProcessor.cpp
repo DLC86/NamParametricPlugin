@@ -218,9 +218,18 @@ void NamParametricPluginAudioProcessor::processBlock(juce::AudioBuffer<float>& b
     const double interfaceLevel = mInputCalibrationParam->load();
     inputGainDb += static_cast<float>(mActiveProcessingState->model->GetInputCalibrationGainDb(
         interfaceLevel, mCalibrateInputParam->load() >= 0.5f));
-    outputGainDb += static_cast<float>(mActiveProcessingState->model->GetOutputCalibrationGainDb(
-        interfaceLevel,
-        static_cast<namparametric::dsp::OutputMode>(static_cast<int>(mOutputModeParam->load()))));
+    auto& state = *mActiveProcessingState;
+    const int outputMode = static_cast<int>(mOutputModeParam->load());
+    // NAM Oversampler::_SetOutputGain is called for model/output changes, not
+    // when InputCalibrationLevel changes. Keep the output reference separate
+    // so adjusting input calibration changes drive without a second output trim.
+    if (outputMode != state.lastOutputMode || outputGainDb != state.lastOutputTrim) {
+      state.outputCalibrationGainDb = state.model->GetOutputCalibrationGainDb(
+          interfaceLevel, static_cast<namparametric::dsp::OutputMode>(outputMode));
+      state.lastOutputMode = outputMode;
+      state.lastOutputTrim = outputGainDb;
+    }
+    outputGainDb += static_cast<float>(state.outputCalibrationGainDb);
   }
   const float inputGain = juce::Decibels::decibelsToGain(inputGainDb);
   const float outputGain = juce::Decibels::decibelsToGain(outputGainDb);

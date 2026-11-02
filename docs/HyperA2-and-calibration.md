@@ -59,6 +59,42 @@ For example, an interface input calibration of +12 dBu and a model input
 reference of +18 dBu produce a -6 dB input correction. A model output
 reference of +6 dBu produces a -6 dB correction in Calibrated output mode.
 
+The update rules also match NAM Oversampler: changing Input calibration or
+Calibrate input updates the **input** gain only. It does not recompute the
+output correction at the same time. Calibrated/Auto output takes its reference
+when a model is activated or Output mode/Output level changes. This preserves
+the reference plugin's behavior, including when recalibrating a loaded model.
+Raw and Normalized output corrections never depend on input calibration.
+Gear types are case-insensitive, and legacy `return_level`/`return_level_dbu`
+metadata is accepted when `output_level_dbu` is absent, as in NAM Oversampler.
+
+Changing drive can still change the audible level through the modeled gear's
+compression/distortion; this is independent of the output gain correction.
+
+## Smooth HyperWaveNet / HyperA2 controls
+
+Both architectures use a 50 ms, per-sample smoothstep crossfade between two
+audio networks at valid control settings. New weights are installed only in
+the currently inaudible network. Both receive the same incoming audio, so
+their convolution histories remain live. Repeated moves retain the latest
+complete control vector and finish the current fade before starting the next.
+This avoids restarting a fade partway through or quantizing a control ramp to
+the host's buffer boundaries. Switch indices/one-hot encodings remain discrete;
+the audio is blended, rather than inventing intermediate switch positions.
+
+The fade runs at the model sample rate, ahead of host-rate resampling, with
+buffers allocated during Reset. Reset and session restore settle directly on
+the requested controls. Settled audio and static exports retain the original
+model response. Static NAM and ConcatWaveNet playback are unchanged.
+
+Keeping two complete histories live costs approximately twice the audio-network
+CPU and memory for HyperWaveNet/HyperA2 (only the selected Full or Lite size is
+duplicated). This is an explicit quality/cost tradeoff, not free parameter
+smoothing. The regression tests report the measured cost and the 1–20 kHz
+step spectrum relative to a hard parameter jump on deterministic fixtures;
+they also exercise fast retargets, multiple switches, odd/large host buffers,
+44.1/48/96 kHz playback and the final settled response.
+
 In the capture app, the **Project** tab can record optional Input and Output
 levels at 0 dBFS. Input describes the capture's D/A/reamp path at the device
 input; Output describes the recording A/D path. These are properties of the

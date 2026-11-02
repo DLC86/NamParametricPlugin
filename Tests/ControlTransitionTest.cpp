@@ -1,0 +1,225 @@
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <limits>
+#include <stdexcept>
+#include <vector>
+
+#include "NamParametricPluginProcessor.h"
+#include "get_dsp.h"
+
+namespace {
+using namparametric::dsp::ModelSize;
+using namparametric::dsp::NamModelEngine;
+using Json = nlohmann::json;
+
+void Check(bool condition, const char* message) {
+  if (!condition) throw std::runtime_error(message);
+}
+
+std::vector<float> Render(NamModelEngine& engine, int length, int block) {
+  std::vector<float> input(static_cast<size_t>(length), 0.0f), output(input.size());
+  for (int offset = 0; offset < length; offset += block)
+    engine.Process(input.data() + offset, output.data() + offset, std::min(block, length - offset));
+  Check(std::all_of(output.begin(), output.end(), [](float x) { return std::isfinite(x); }),
+        "Control transition produced non-finite audio");
+  return output;
+}
+
+void TestTransition(const std::filesystem::path& path, ModelSize size, double rate, int block) {
+  NamModelEngine engine;
+  std::string error;
+  Check(engine.LoadModel(path.string(), error, size), error.c_str());
+  engine.Reset(rate, block);
+  auto values = engine.GetParameterValues();
+  const auto before = Render(engine, 16000, block).back();
+  NamModelEngine unchanged;
+  Check(unchanged.LoadModel(path.string(), error, size), error.c_str());
+  unchanged.Reset(rate, block);
+  Render(unchanged, 16000, block);
+  const auto baseline = Render(unchanged, 16000, block);
+  // Move the knob and both switches together; every network still receives exact indices.
+  values = {9.0f, 1.0f, 2.0f};
+  Check(engine.SetParameterValues(values), "Valid control destination rejected");
+  const auto changed = Render(engine, 16000, block);
+  const float difference = std::abs(changed.back() - before);
+  Check(difference > 1e-6f, "Fixture does not respond to the controls");
+  Check(std::abs(changed.front() - baseline.front()) < difference * 0.001f,
+        "Control update still jumps at the host block boundary");
+  // Subtract an unchanged stream with identical resampler phase: polyphase
+  // DC ripple is not a discontinuity introduced by a control update.
+  float maxStep = std::abs(changed.front() - baseline.front());
+  for (size_t i = 1; i < changed.size(); ++i)
+    maxStep = std::max(maxStep,
+                       std::abs((changed[i] - baseline[i]) - (changed[i - 1] - baseline[i - 1])));
+  Check(maxStep < difference * 0.02f, "Transition has a discontinuity");
+  if (rate == 48000 && block == 257) {
+    // Spectrum of the step's derivative: a hard weight jump is an impulse,
+    // whose magnitude is 'difference' at every frequency. Compare its upper
+    // audio band with the actual rendered transition, including network history.
+    double worstRatio = 0;
+    for (int hz = 1000; hz <= 20000; hz += 1000) {
+      double real = 0, imaginary = 0;
+      float previous = before;
+      for (size_t i = 0; i < changed.size(); ++i) {
+        const double delta = changed[i] - previous;
+        const double angle = 6.283185307179586 * hz * static_cast<double>(i) / rate;
+        real += delta * std::cos(angle);
+        imaginary -= delta * std::sin(angle);
+        previous = changed[i];
+      }
+      worstRatio = std::max(worstRatio, std::hypot(real, imaginary) / difference);
+    }
+    Check(worstRatio < 0.01, "Transition retains excessive high-frequency step energy");
+    std::cout << "Worst 1-20 kHz step spectrum vs hard jump: "
+              << 20 * std::log10(std::max(worstRatio, 1e-12)) << " dB\n";
+  }
+  // A fresh stream must settle directly on the same destination, not glide from defaults.
+  NamModelEngine settled;
+  Check(settled.LoadModel(path.string(), error, size), error.c_str());
+  Check(settled.SetParameterValues(values), "Restored controls rejected");
+  settled.Reset(rate, block);
+  Check(std::abs(Render(settled, 16000, block).back() - changed.back()) < 1e-6f,
+        "Fade did not reach the exact destination model");
+
+  // Rapid retargets must queue the latest complete vector, rather than restarting
+  // a half-finished fade (which would cause another discontinuity).
+  for (int i = 0; i < 19; ++i) {
+    values = {static_cast<float>(i % 11), static_cast<float>(i % 2), static_cast<float>(i % 3)};
+    Check(engine.SetParameterValues(values), "Retarget rejected");
+    Render(engine, 37, block);
+  }
+  const auto latest = engine.GetParameterValues();
+  const auto after = Render(engine, 16000, block).back();
+  Check(settled.SetParameterValues(latest), "Final controls rejected");
+  settled.Reset(rate, block);
+  Check(std::abs(Render(settled, 16000, block).back() - after) < 1e-6f,
+        "Rapid retarget lost the latest destination");
+  auto invalid = latest;
+  invalid[1] = 0.5f;
+  Check(!engine.SetParameterValues(invalid) && engine.GetParameterValues() == latest,
+        "Fractional switch destination was accepted");
+  invalid = latest;
+  invalid[0] = std::numeric_limits<float>::quiet_NaN();
+  Check(!engine.SetParameterValues(invalid), "NaN destination was accepted");
+
+  std::cout << path.filename() << " size=" << (size == ModelSize::Full ? "Full" : "Lite")
+            << " rate=" << rate << " block=" << block
+            << " maximum step/jump=" << maxStep / difference << '\n';
+}
+
+void Set(NamParametricPluginAudioProcessor& processor, const char* id, float plain) {
+  auto* parameter = processor.mValueTree.getParameter(id);
+  parameter->setValueNotifyingHost(parameter->convertTo0to1(plain));
+}
+
+float ProcessSilence(NamParametricPluginAudioProcessor& processor, int blocks = 1) {
+  juce::AudioBuffer<float> audio(2, 257);
+  juce::MidiBuffer midi;
+  for (int i = 0; i < blocks; ++i) {
+    audio.clear();
+    processor.processBlock(audio, midi);
+  }
+  return audio.getSample(0, 256);
+}
+
+void TestLiveCalibration(const std::filesystem::path& path) {
+  NamParametricPluginAudioProcessor processor;
+  processor.prepareToPlay(48000, 257);
+  Set(processor, "calibrateInput", 0);
+  Set(processor, "outputMode", 2);
+  processor.LoadModelAsync(juce::File(juce::String(path.string())));
+  const auto deadline = juce::Time::getMillisecondCounterHiRes() + 15000;
+  while (!processor.GetStatusText().startsWith("Loaded model:")) {
+    Check(juce::Time::getMillisecondCounterHiRes() < deadline, "Model load timed out");
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(10);
+  }
+  const float original = ProcessSilence(processor, 100);
+  Set(processor, "inputCalibration", 18);
+  Check(std::abs(ProcessSilence(processor) - original) < 1e-7f,
+        "Input calibration unexpectedly changed the output trim");
+  // Like NAM Oversampler, an explicit output-mode change takes a new reference.
+  Set(processor, "outputMode", 0);
+  const float raw = ProcessSilence(processor);
+  Set(processor, "outputMode", 2);
+  const float rereferenced = ProcessSilence(processor);
+  Check(std::abs(original - raw * std::pow(10.0f, -6.0f / 20.0f)) < 1e-6f &&
+            std::abs(rereferenced - raw * std::pow(10.0f, -12.0f / 20.0f)) < 1e-6f,
+        "Calibrated output does not match NAM Oversampler");
+  // Input correction itself remains live and retains the reference implementation's sign.
+  NamModelEngine engine;
+  std::string error;
+  Check(engine.LoadModel(path.string(), error), error.c_str());
+  Check(engine.GetInputCalibrationGainDb(12, true) == -6 &&
+            engine.GetInputCalibrationGainDb(18, true) == 0 &&
+            engine.GetInputCalibrationGainDb(24, true) == 6,
+        "Input calibration sign or live response is incorrect");
+}
+}  // namespace
+
+void TestControlTransitions(const std::filesystem::path& directory, const Json& hyper,
+                            const Json& a2) {
+  for (const bool nested : {false, true}) {
+    const auto path = directory / (nested ? "transition_a2.nam" : "transition_hyper.nam");
+    {
+      std::ofstream stream(path);
+      stream << (nested ? a2 : hyper);
+    }
+    for (const auto size : {ModelSize::Full, ModelSize::Lite}) {
+      if (!nested && size == ModelSize::Lite) continue;
+      for (const int block : {37, 257, 2048}) TestTransition(path, size, 48000, block);
+      TestTransition(path, size, 44100, 257);
+      TestTransition(path, size, 96000, 257);
+    }
+    TestLiveCalibration(path);
+  }
+  // Cost probe uses the same HyperWaveNet, audio and block size for raw core
+  // and plugin smoothing. Report, rather than assert, machine-dependent timing.
+  auto raw = nam::get_dsp(hyper);
+  raw->Reset(48000, 257);
+  NamModelEngine engine;
+  std::string error;
+  Check(engine.LoadModel((directory / "transition_hyper.nam").string(), error), error.c_str());
+  engine.Reset(48000, 257);
+  float input[257]{}, output[257]{};
+  const auto measure = [&](bool smooth) {
+    const auto start = std::chrono::steady_clock::now();
+    for (int i = 0; i < 400; ++i) {
+      if (smooth)
+        engine.Process(input, output, 257);
+      else {
+        float* in = input;
+        float* out = output;
+        raw->process(&in, &out, 257);
+      }
+    }
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
+        .count();
+  };
+  const auto rawMs = measure(false);
+  const auto smoothMs = measure(true);
+  std::cout << "400 x 257 samples, raw=" << rawMs << " ms, smooth=" << smoothMs
+            << " ms, cost ratio=" << smoothMs / rawMs << '\n';
+  // Metadata parity with NAM Oversampler: case-insensitive gear and old return keys.
+  for (const char* key : {"return_level", "return_level_dbu"}) {
+    auto legacy = hyper;
+    legacy["metadata"].erase("output_level_dbu");
+    legacy["metadata"][key] = 6.0;
+    legacy["metadata"]["gear_type"] = "AMP";
+    const auto path = directory / "legacy_calibration.nam";
+    {
+      std::ofstream stream(path);
+      stream << legacy;
+    }
+    NamModelEngine legacyEngine;
+    std::string legacyError;
+    Check(legacyEngine.LoadModel(path.string(), legacyError), legacyError.c_str());
+    Check(legacyEngine.GetOutputCalibrationGainDb(12, namparametric::dsp::OutputMode::Auto) == 6 &&
+              legacyEngine.GetOutputCalibrationGainDb(
+                  12, namparametric::dsp::OutputMode::Calibrated) == -6,
+          "Legacy metadata differs from NAM Oversampler");
+  }
+}

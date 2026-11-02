@@ -13,6 +13,9 @@
 #include "wavenet/a2_fast.h"
 #include "wavenet/hyperwavenet.h"
 
+void TestControlTransitions(const std::filesystem::path& directory, const nlohmann::json& hyper,
+                            const nlohmann::json& a2);
+
 namespace {
 using Json = nlohmann::json;
 using namparametric::dsp::ModelSize;
@@ -325,6 +328,7 @@ int main(int argc, const char* const* argv) {
     std::filesystem::create_directories(directory);
     TestBaking(directory);
     TestSnapshotAndFiles(directory);
+    TestControlTransitions(directory, MakeHyper(3, false), MakeA2(false));
     std::cout << "All static NAM export tests passed\n";
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

@@ -122,6 +122,9 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
     std::shared_ptr<RuntimeParameterMailbox> mailbox;
     std::vector<float> pendingValues;
     uint64_t consumedVersion = 0;
+    double outputCalibrationGainDb = 0.0;
+    int lastOutputMode = -1;
+    float lastOutputTrim = 0.0f;
   };
 
   struct RestoredRuntimeParameterValue {

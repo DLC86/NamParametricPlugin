@@ -54,8 +54,17 @@ class NamModelEngine {
   struct ResamplerState;
   [[nodiscard]] double GetModelSampleRateForProcessing() const;
   [[nodiscard]] bool NeedToResample() const;
+  void ProcessModel(float* input, float* output, int numSamples);
 
   std::unique_ptr<nam::DSP> mModel;
+  // Both histories keep receiving the same audio. Only the inaudible network
+  // receives new weights; a sample-continuous fade then exchanges their roles.
+  std::unique_ptr<nam::DSP> mTransitionModel;
+  nam::IParametricControl* mTransitionControl = nullptr;
+  std::vector<float> mTransitionOutput, mRenderedValues;
+  int mFadePosition = 0;
+  int mFadeLength = 0;
+  bool mFading = false;
   std::shared_ptr<const nlohmann::json> mExportSource;
   bool mSupportsSizeSelection = false;
   ModelSize mModelSize = ModelSize::Full;
