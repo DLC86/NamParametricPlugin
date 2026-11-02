@@ -58,7 +58,7 @@ jobs:
           tar -czf "dist/NAM-Parametric-Plugin-$version-Linux-x86_64-Standalone.tar.gz" \
             -C "$root/Standalone" 'NAM Parametric Plugin' THIRD-PARTY-NOTICES.md
           tar -czf "dist/NAM-Parametric-Plugin-$version-Linux-x86_64-VST3.tar.gz" \
-            -C "$root/VST3" 'NAM Parametric Plugin.vst3' THIRD-PARTY-NOTICES.md
+            -C "$root/VST3" 'NAM Parametric Plugin.vst3'
           for package in dist/*.tar.gz; do tar -tzf "$package"; done
       - name: Attach Linux packages to the matching release
         if: inputs.upload_release
@@ -75,6 +75,7 @@ jobs:
           PY
           gh release upload "$RELEASE_TAG" dist/*.tar.gz
       - name: Preserve packages and runtime report
+        if: always()
         uses: actions/upload-artifact@v4
         continue-on-error: ${{ inputs.upload_release }}
         with:
