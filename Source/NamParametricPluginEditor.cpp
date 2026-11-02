@@ -124,7 +124,8 @@ void NamParametricPluginAudioProcessorEditor::ShowModelChooser() {
   const juce::File startDirectory =
       currentModelFile.existsAsFile() ? currentModelFile.getParentDirectory() : juce::File();
   mModelChooser =
-      std::make_unique<juce::FileChooser>("Select a NAM model", startDirectory, "*.nam");
+      std::make_unique<juce::FileChooser>("Select a NAM or parametric model", startDirectory,
+                                         "*.nam;*.pnam");
 
   const int chooserFlags =
       juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;

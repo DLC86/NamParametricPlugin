@@ -1,6 +1,6 @@
 # NamParametricPlugin
 
-JUCE-based `VST3 + AU + Standalone` plugin for loading and running Neural Amp Modeler (`.nam`) models,
+JUCE-based `VST3 + AU + Standalone` plugin for loading and running Neural Amp Modeler (`.nam` and `.pnam`) models,
 including parametric NAM models via `nam_core_parametric`.
 
 ## Related Projects
@@ -87,6 +87,9 @@ To use a model, download a `.nam` file and load it in the plugin (see [Usage Not
   - `Input Gain` (`-12 dB` to `+12 dB`)
   - `Output Gain` (`-12 dB` to `+12 dB`)
 - Model load via file chooser (`.nam`).
+- Parametric models may use **`.pnam`**, as exported by ParaNAM Trainer. Legacy
+  parametric `.nam` files still load; the content and metadata format are the same.
+  **Export NAM...** continues to produce a static **`.nam`**.
 - Dynamic model parameters are generated in the plugin UI and applied at runtime.
 - **Control smoothing** in Settings defaults to experimental **Eco de-click** in 0.4.1:
   one running network and a 5 ms correction of output steps when controls change.

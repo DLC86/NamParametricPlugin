@@ -247,7 +247,7 @@ void TestSnapshotAndFiles(const std::filesystem::path& directory) {
   Processor processor;
   Check(!processor.CanExportStaticModel() && !processor.CreateStaticExportSnapshot(),
         "Empty processor offers export");
-  const auto path = directory / "Pedal.nam";
+  const auto path = directory / "Pedal.pnam";
   const auto original = MakeA2(true);
   Write(path, original);
   processor.LoadModelAsync(juce::File(juce::String(path.string())));
@@ -272,7 +272,7 @@ void TestSnapshotAndFiles(const std::filesystem::path& directory) {
   Check(result.wasOk(), result.getErrorMessage().toStdString());
   const auto saved = Json::parse(destination.loadFileAsString().toStdString());
   Check(saved ==
-            NamModelEngine::BakeStaticModel(original, std::vector<float>{6.5f, 1, 2}, "Pedal.nam"),
+            NamModelEngine::BakeStaticModel(original, std::vector<float>{6.5f, 1, 2}, "Pedal.pnam"),
         "Export used later controls or re-read the source from disk");
   auto invalid = *snapshot;
   invalid.values.clear();

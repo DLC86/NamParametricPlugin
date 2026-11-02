@@ -287,6 +287,23 @@ void TestControlTransitions(const std::filesystem::path& directory, const Json& 
       TestEco(path, size, 96000, 257);
     }
     TestLiveCalibration(path);
+    // Extension is a label, not a different container. Both legacy .nam and
+    // .pnam must preserve the complete model, controls and metadata on load.
+    auto pnam = path;
+    pnam.replace_extension(".pnam");
+    std::filesystem::copy_file(path, pnam, std::filesystem::copy_options::overwrite_existing);
+    for (const auto size : {ModelSize::Full, ModelSize::Lite}) {
+      NamModelEngine legacy, renamed;
+      std::string error;
+      Check(legacy.LoadModel(path.string(), error, size), error.c_str());
+      Check(renamed.LoadModel(pnam.string(), error, size), error.c_str());
+      Check(*legacy.GetExportSource() == *renamed.GetExportSource(),
+            "PNAM load changed model data or metadata");
+      legacy.Reset(48000, 257);
+      renamed.Reset(48000, 257);
+      Check(Render(legacy, 8192, 257) == Render(renamed, 8192, 257),
+            "PNAM load changed the audio response");
+    }
   }
   TestEcoUnaffectedSignal(directory, hyper);
   // Cost probe uses the same HyperWaveNet, audio and block size for raw core
