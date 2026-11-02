@@ -41,6 +41,7 @@ jobs:
         run: ctest --test-dir build/${{ matrix.preset }} -C Release --output-on-failure -R "^static_export$"
       - name: Upload export validation files
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}-Export-Validation
