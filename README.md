@@ -16,7 +16,7 @@ This plugin builds on two companion repositories:
 ## Download
 
 Prebuilt builds are published on the
-[Releases page](https://github.com/phillipmself/NamParametricPlugin/releases).
+[Releases page](https://github.com/DLC86/NamParametricPlugin/releases).
 
 ### macOS (universal: `arm64` + `x86_64`)
 
@@ -73,6 +73,8 @@ To use a model, download a `.nam` file and load it in the plugin (see [Usage Not
   - `Output Gain` (`-12 dB` to `+12 dB`)
 - Model load via file chooser (`.nam`).
 - Dynamic model parameters are generated in the plugin UI and applied at runtime.
+- HyperWaveNet and HyperA2 controls use 50 ms audio crossfades, including switches.
+  Keeping both network histories live costs approximately twice the model DSP CPU.
 - **Export NAM...** freezes HyperWaveNet controls into a static WaveNet, or HyperA2
   controls into one static file containing **both Lite and Full**. The suggested
   filename includes the settings; custom metadata records every control name and
@@ -83,7 +85,8 @@ To use a model, download a `.nam` file and load it in the plugin (see [Usage Not
   Changing size loads the replacement in the background and retains current knob values.
   Sessions remember an explicitly selected Lite mode; older sessions default to Full.
 - **Settings** contains **Input calibration**, **Calibrate input** and **Output mode**,
-  using the same level conventions and gain equations as standard NAM. Details are in
+  using NAM Oversampler's level equations and update rules: changing Input calibration
+  updates drive without simultaneously recomputing the output trim. Details are in
   [HyperA2 and level calibration](docs/HyperA2-and-calibration.md).
 - Dynamic model parameters are **not** exposed as host automation parameters in v1.
 - Plugin state persists:
