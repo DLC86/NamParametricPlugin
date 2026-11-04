@@ -26,6 +26,12 @@ jobs:
         with:
           ref: ${{ inputs.source_ref }}
           submodules: recursive
+      - name: Retrieve pinned synthetic PNAM test fixtures
+        uses: actions/checkout@v4
+        with:
+          repository: DLC86/NeuralAudio
+          ref: 8a9b185dabd5d433b024bec1cd35d68fd3cd8a3f
+          path: test-fixtures-source
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
@@ -38,11 +44,11 @@ jobs:
           cmake -S . -B build/linux-release -G Ninja -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld -DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld
-          -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld -DNAM_PARAMETRIC_BUILD_TESTS=ON
+          -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld -DNAM_PARAMETRIC_BUILD_TESTS=ON -DNAM_HYPER_A2_TEST_DIR=${{ github.workspace }}/test-fixtures-source/Tests/fixtures
       - name: Build
-        run: cmake --build build/linux-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_Standalone static_export_test
+        run: cmake --build build/linux-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_Standalone static_export_test hyper_a2_engine_test pnam_fast_path_test hyper_a2_processor_test
       - name: Verify export, calibration and smooth controls
-        run: xvfb-run -a ctest --test-dir build/linux-release --output-on-failure -R '^static_export$'
+        run: xvfb-run -a ctest --test-dir build/linux-release --output-on-failure
       - name: Check runtime libraries and package
         run: |
           set -euo pipefail
