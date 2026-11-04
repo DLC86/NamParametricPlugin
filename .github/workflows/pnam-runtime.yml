@@ -1,0 +1,27 @@
+name: PNAM DSP regression
+on:
+  push:
+    branches: [codex/pnam-dsp-optimization]
+  workflow_dispatch:
+jobs:
+  runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-15, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize runtime dependencies
+        run: git submodule update --init --recursive external/nam_core_parametric external/AudioDSPTools
+      - uses: actions/checkout@v4
+        with:
+          repository: DLC86/NeuralAudio
+          ref: 792af46300f6b2682c9223fc3197aad2892ec166
+          path: fixtures-source
+      - name: Configure without JUCE
+        run: cmake -S Tests/Runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release -DPNAM_FIXTURES=${{ github.workspace }}/fixtures-source/Tests/fixtures
+      - name: Build
+        run: cmake --build build/runtime --config Release --parallel 2
+      - name: Test fast path and engine against PyTorch
+        run: ctest --test-dir build/runtime -C Release --output-on-failure

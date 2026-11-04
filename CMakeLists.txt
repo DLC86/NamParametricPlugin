@@ -256,6 +256,18 @@ if(NAM_PARAMETRIC_BUILD_TESTS)
     ${NAM_CORE_DIR} ${NAM_CORE_NAM_DIR} ${NAM_CORE_EIGEN_DIR} ${NAM_CORE_NLOHMANN_DIR})
   target_compile_definitions(hyper_a2_engine_test PRIVATE EIGEN_MPL2_ONLY=1
     EIGEN_NO_DEBUG=1 NAM_SAMPLE_FLOAT=1 NAM_ENABLE_A2_FAST=1)
+  add_executable(pnam_benchmark Tests/PnamBenchmark.cpp
+    Source/DSP/NamModelEngine.cpp $<TARGET_OBJECTS:nam_core_runtime>)
+  target_include_directories(pnam_benchmark PRIVATE ${CMAKE_CURRENT_LIST_DIR}/Source)
+  target_include_directories(pnam_benchmark SYSTEM PRIVATE ${AUDIODSPTOOLS_DIR}
+    ${NAM_CORE_DIR} ${NAM_CORE_NAM_DIR} ${NAM_CORE_EIGEN_DIR} ${NAM_CORE_NLOHMANN_DIR})
+  target_compile_definitions(pnam_benchmark PRIVATE EIGEN_MPL2_ONLY=1
+    EIGEN_NO_DEBUG=1 NAM_SAMPLE_FLOAT=1 NAM_ENABLE_A2_FAST=1)
+  add_executable(pnam_fast_path_test Tests/PnamFastPathTest.cpp $<TARGET_OBJECTS:nam_core_runtime>)
+  target_include_directories(pnam_fast_path_test SYSTEM PRIVATE
+    ${NAM_CORE_DIR} ${NAM_CORE_NAM_DIR} ${NAM_CORE_EIGEN_DIR} ${NAM_CORE_NLOHMANN_DIR})
+  target_compile_definitions(pnam_fast_path_test PRIVATE EIGEN_MPL2_ONLY=1
+    EIGEN_NO_DEBUG=1 NAM_SAMPLE_FLOAT=1 NAM_ENABLE_A2_FAST=1)
   juce_add_console_app(hyper_a2_processor_test PRODUCT_NAME "HyperA2 Processor Test")
   target_sources(hyper_a2_processor_test PRIVATE Tests/HyperA2ProcessorTest.cpp
     Tests/SwitchCombinationTest.cpp
@@ -284,6 +296,7 @@ if(NAM_PARAMETRIC_BUILD_TESTS)
   endif()
   if(BUILD_TESTING AND EXISTS "${NAM_HYPER_A2_TEST_DIR}/manifest.json")
     add_test(NAME hyper_a2_engine COMMAND hyper_a2_engine_test "${NAM_HYPER_A2_TEST_DIR}")
+    add_test(NAME pnam_fast_path COMMAND pnam_fast_path_test "${NAM_HYPER_A2_TEST_DIR}")
     add_test(NAME hyper_a2_processor COMMAND hyper_a2_processor_test "${NAM_HYPER_A2_TEST_DIR}")
     set_tests_properties(hyper_a2_processor PROPERTIES TIMEOUT 180)
   endif()

@@ -21,7 +21,7 @@ inline constexpr double PI = std::numbers::pi_v<double>;
 
 #include "dsp/ResamplingContainer/ResamplingContainer.h"
 #include "get_dsp.h"
-#include "wavenet/a2_fast.h"
+#include "wavenet/hyper_a2.h"
 #include "wavenet/hyperwavenet.h"
 
 namespace namparametric::dsp {
@@ -29,61 +29,8 @@ namespace namparametric::dsp {
 namespace {
 constexpr double kAssumedUnknownModelSampleRate = 48000.0;
 
-size_t ReadCount(const nlohmann::json& entry, const char* key) {
-  const auto& value = entry.at(key);
-  if (!value.is_number_integer() || value < 0) {
-    throw std::runtime_error(std::string("HyperA2: invalid ") + key);
-  }
-  return value.get<size_t>();
-}
-
-// The trainer exports Lite then Full, each with the unchanged HyperWaveNet
-// layout. Select before constructing the DSP so only one audio network runs.
 nlohmann::json SelectHyperA2Branch(const nlohmann::json& model, ModelSize size) {
-  if (model.at("version") != "1.0.0") {
-    throw std::runtime_error("HyperA2: unsupported model version (expected 1.0.0).");
-  }
-  const auto& config = model.at("config");
-  const auto& weights = model.at("weights");
-  const auto& branches = config.at("submodels");
-  if (!weights.is_array() || !branches.is_array() || branches.size() != 2) {
-    throw std::runtime_error("HyperA2: expected Lite and Full submodels and a flat weights array.");
-  }
-  nam::parse_param_specs(config, "HyperA2");
-  size_t cursor = 0;
-  for (size_t index = 0; index < 2; ++index) {
-    const auto& branch = branches[index];
-    const auto& branchConfig = branch.at("config");
-    int channels = 0;
-    const size_t count = ReadCount(branch, "weight_count");
-    const size_t baseCount = ReadCount(branch, "base_weight_count");
-    if (branch.at("name") != (index == 0 ? "lite" : "full") ||
-        branch.at("architecture") != "HyperWaveNet" ||
-        branch.at("max_value") != (index == 0 ? 0.5 : 1.0) ||
-        branchConfig.at("params") != config.at("params") ||
-        !nam::wavenet::a2_fast::is_a2_shape(branchConfig, &channels) ||
-        channels != (index == 0 ? 3 : 8) || baseCount != (index == 0 ? 1871u : 12146u) ||
-        count <= baseCount || ReadCount(branch, "weight_offset") != cursor ||
-        cursor > weights.size() || count > weights.size() - cursor) {
-      throw std::runtime_error(
-          "HyperA2: inconsistent submodel topology, controls or weight layout.");
-    }
-    cursor += count;
-  }
-  if (cursor != weights.size()) {
-    throw std::runtime_error("HyperA2: weights contain unowned trailing values.");
-  }
-  const auto& selected = branches[size == ModelSize::Lite ? 0 : 1];
-  const size_t offset = ReadCount(selected, "weight_offset");
-  const size_t count = ReadCount(selected, "weight_count");
-  nlohmann::json child = model;
-  child["architecture"] = "HyperWaveNet";
-  child["config"] = selected.at("config");
-  child["weights"] = nlohmann::json::array();
-  for (size_t i = offset; i < offset + count; ++i) {
-    child["weights"].push_back(weights[i]);
-  }
-  return child;
+  return nam::wavenet::SelectHyperA2Branch(model, size == ModelSize::Lite);
 }
 
 bool IsStaticA2Container(const nlohmann::json& model) {
