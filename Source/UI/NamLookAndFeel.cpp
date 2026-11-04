@@ -16,8 +16,8 @@ using nam::ui::Colours::track;
 
 NamLookAndFeel::NamLookAndFeel() {
   setColourScheme(juce::LookAndFeel_V4::ColourScheme(
-      background, nam::ui::Colours::topBarBackground, nam::ui::Colours::topBarBackground,
-      hairline, textPrimary, track, nam::ui::Colours::onAccent, accent, textPrimary));
+      background, nam::ui::Colours::topBarBackground, nam::ui::Colours::topBarBackground, hairline,
+      textPrimary, track, nam::ui::Colours::onAccent, accent, textPrimary));
   setColour(juce::ResizableWindow::backgroundColourId, background);
   setColour(juce::Label::textColourId, textPrimary);
   setColour(juce::TextButton::buttonColourId, nam::ui::Colours::topBarBackground);

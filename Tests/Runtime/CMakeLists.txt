@@ -13,6 +13,9 @@ target_compile_definitions(pnam_core PUBLIC NAM_SAMPLE_FLOAT=1 NAM_ENABLE_A2_FAS
 if(WIN32)
     target_compile_definitions(pnam_core PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(pnam_core PUBLIC -fsigned-char)
+endif()
 target_include_directories(pnam_core SYSTEM PUBLIC ${CORE} ${CORE}/NAM
     ${CORE}/Dependencies/eigen ${CORE}/Dependencies/nlohmann ${AUDIO})
 add_executable(pnam_fast_path_test ../PnamFastPathTest.cpp)

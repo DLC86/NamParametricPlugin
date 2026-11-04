@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: DLC86/NeuralAudio
-          ref: 792af46300f6b2682c9223fc3197aad2892ec166
+          ref: e92c8dc221cdca7d8f8345eb2ba81a6c78a088d2
           path: fixtures-source
       - name: Configure without JUCE
         run: cmake -S Tests/Runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release -DPNAM_FIXTURES=${{ github.workspace }}/fixtures-source/Tests/fixtures
