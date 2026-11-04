@@ -159,8 +159,8 @@ void ModelParametersPanel::LayoutContent() {
   // Keep every segment reachable when one switch is wider than the viewport.
   for (const auto& control : mControls) {
     if (control.switchControl != nullptr) {
-      contentWidth = juce::jmax(contentWidth,
-                               control.switchControl->getPreferredWidth() + 2 * kSidePadding);
+      contentWidth =
+          juce::jmax(contentWidth, control.switchControl->getPreferredWidth() + 2 * kSidePadding);
     }
   }
 

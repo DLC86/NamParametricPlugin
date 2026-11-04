@@ -1,3 +1,5 @@
+#include <juce_audio_devices/juce_audio_devices.h>
+
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -5,7 +7,6 @@
 #include <iostream>
 #include <limits>
 #include <stdexcept>
-#include <juce_audio_devices/juce_audio_devices.h>
 
 #include "NamParametricPluginProcessor.h"
 #include "UI/ModelBarComponent.h"

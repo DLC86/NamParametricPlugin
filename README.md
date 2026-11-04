@@ -1,8 +1,9 @@
 # NamParametricPlugin
 
-Version 0.4.3 refreshes the interface with a #bf0000 red accent and neutral gray
-surfaces, preserving the previous surface brightness. Audio behavior is unchanged.
-The TTS logo from NAM On Steroids is the application icon on all platforms.
+Version 0.4.4 accelerates HyperA2 Full and Lite with the specialized A2 audio
+backend and NeuralAudio-style multi-frame optimizations. Control changes preserve
+audio history, calibration and the existing de-click. See the
+[benchmark and validation report](docs/pnam-performance.md).
 
 JUCE-based `VST3 + AU + Standalone` plugin for loading and running Neural Amp Modeler (`.nam` and `.pnam`) models,
 including parametric NAM models via `nam_core_parametric`.

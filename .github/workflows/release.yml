@@ -22,7 +22,7 @@ jobs:
           grep -Fx "project(NamParametricPlugin VERSION $version)" CMakeLists.txt
           gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
             --target "$GITHUB_SHA" --title "NAM Parametric Plugin $version" \
-            --notes "Version $version refreshes the interface with a #bf0000 red accent and neutral gray surfaces of similar brightness. The TTS logo from NAM On Steroids is the application icon. Includes the existing ASIO standalone backend, HyperA2 Full/Lite, .pnam and .nam support, calibration and Eco de-click. Audio behavior is unchanged. Windows x64 standalone and VST3; macOS universal standalone, VST3 and AU; Linux x86_64 standalone and VST3. Export, calibration and control-transition tests run on all platforms before publication."
+            --notes-file "docs/releases/$version.md"
   build-macos:
     needs: prepare
     runs-on: macos-15-intel
@@ -32,18 +32,24 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Retrieve pinned synthetic PNAM test fixtures
+        uses: actions/checkout@v4
+        with:
+          repository: DLC86/NeuralAudio
+          ref: 8a9b185dabd5d433b024bec1cd35d68fd3cd8a3f
+          path: test-fixtures-source
 
       - name: Install Ninja
         run: brew install ninja
 
       - name: Configure
-        run: cmake --preset mac-release -DNAM_PARAMETRIC_BUILD_TESTS=ON
+        run: cmake --preset mac-release -DNAM_PARAMETRIC_BUILD_TESTS=ON -DNAM_HYPER_A2_TEST_DIR=${{ github.workspace }}/test-fixtures-source/Tests/fixtures
 
       - name: Build
-        run: cmake --build --preset mac-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_AU NamParametricPlugin_Standalone static_export_test
+        run: cmake --build --preset mac-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_AU NamParametricPlugin_Standalone static_export_test hyper_a2_engine_test pnam_fast_path_test hyper_a2_processor_test
 
       - name: Verify audio, calibration and control smoothing
-        run: ctest --test-dir build/mac-release --output-on-failure -R '^static_export$'
+        run: ctest --test-dir build/mac-release --output-on-failure
 
       - name: Package artifacts
         run: |
@@ -84,6 +90,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Retrieve pinned synthetic PNAM test fixtures
+        uses: actions/checkout@v4
+        with:
+          repository: DLC86/NeuralAudio
+          ref: 8a9b185dabd5d433b024bec1cd35d68fd3cd8a3f
+          path: test-fixtures-source
 
       - name: Install Ninja
         run: choco install ninja -y
@@ -92,13 +104,13 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Configure
-        run: cmake --preset windows-release -DNAM_PARAMETRIC_BUILD_TESTS=ON
+        run: cmake --preset windows-release -DNAM_PARAMETRIC_BUILD_TESTS=ON -DNAM_HYPER_A2_TEST_DIR=${{ github.workspace }}/test-fixtures-source/Tests/fixtures
 
       - name: Build
-        run: cmake --build --preset windows-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_Standalone static_export_test
+        run: cmake --build --preset windows-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_Standalone static_export_test hyper_a2_engine_test pnam_fast_path_test hyper_a2_processor_test
 
       - name: Verify audio, calibration and control smoothing
-        run: ctest --test-dir build/windows-release --output-on-failure -R '^static_export$'
+        run: ctest --test-dir build/windows-release --output-on-failure
 
       - name: Package artifacts
         shell: pwsh

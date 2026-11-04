@@ -1,0 +1,187 @@
+{
+  "cpu": "12th Gen Intel(R) Core(TM) i7-12700H",
+  "os": "Windows-11-10.0.26300-SP0",
+  "compiler": "MSVC 19.51 /O2, x64, no AVX2 requirement",
+  "baseline_plugin_commit": "03b423f336dbfb4f86308e65445f468e2e00ad46",
+  "baseline_core_commit": "fddcbc91e74ba79066a43c3b73cc690073529232",
+  "fixture": "synthetic HyperA2 low-rank, full and lite",
+  "method": "median of 3 alternating runs; 200 warmup blocks + 1000 timed blocks per case; Eco transition",
+  "results": [
+    {
+      "size": "full",
+      "block": 32,
+      "moving": false,
+      "baseline_us": 71.75750000000016,
+      "optimized_us": 55.582200000000036,
+      "reduction_percent": 22.54161585896958,
+      "speedup": 1.2910158288085056,
+      "baseline_p99_us": 126.8,
+      "optimized_p99_us": 70.6
+    },
+    {
+      "size": "full",
+      "block": 32,
+      "moving": true,
+      "baseline_us": 96.10029999999982,
+      "optimized_us": 65.18039999999968,
+      "reduction_percent": 32.17461339870968,
+      "speedup": 1.4743741983786582,
+      "baseline_p99_us": 130.8,
+      "optimized_p99_us": 80.6
+    },
+    {
+      "size": "full",
+      "block": 64,
+      "moving": false,
+      "baseline_us": 121.94950000000031,
+      "optimized_us": 102.74559999999938,
+      "reduction_percent": 15.747420038623261,
+      "speedup": 1.1869072738881377,
+      "baseline_p99_us": 158.2,
+      "optimized_p99_us": 113.6
+    },
+    {
+      "size": "full",
+      "block": 64,
+      "moving": true,
+      "baseline_us": 153.31589999999994,
+      "optimized_us": 119.22620000000018,
+      "reduction_percent": 22.234941059602942,
+      "speedup": 1.2859245702706261,
+      "baseline_p99_us": 175.2,
+      "optimized_p99_us": 151.0
+    },
+    {
+      "size": "full",
+      "block": 128,
+      "moving": false,
+      "baseline_us": 233.0609999999999,
+      "optimized_us": 195.3769999999993,
+      "reduction_percent": 16.16915743088746,
+      "speedup": 1.1928783838425236,
+      "baseline_p99_us": 314.9,
+      "optimized_p99_us": 258.5
+    },
+    {
+      "size": "full",
+      "block": 128,
+      "moving": true,
+      "baseline_us": 267.0904,
+      "optimized_us": 213.2588000000001,
+      "reduction_percent": 20.154823984688296,
+      "speedup": 1.2524238155705643,
+      "baseline_p99_us": 356.9,
+      "optimized_p99_us": 295.0
+    },
+    {
+      "size": "full",
+      "block": 256,
+      "moving": false,
+      "baseline_us": 480.12480000000045,
+      "optimized_us": 380.0922999999998,
+      "reduction_percent": 20.834687148008303,
+      "speedup": 1.2631794961381768,
+      "baseline_p99_us": 609.9,
+      "optimized_p99_us": 460.2
+    },
+    {
+      "size": "full",
+      "block": 256,
+      "moving": true,
+      "baseline_us": 494.1057000000001,
+      "optimized_us": 410.60290000000026,
+      "reduction_percent": 16.899784803130146,
+      "speedup": 1.2033663181628766,
+      "baseline_p99_us": 635.2,
+      "optimized_p99_us": 557.9
+    },
+    {
+      "size": "lite",
+      "block": 32,
+      "moving": false,
+      "baseline_us": 44.17619999999999,
+      "optimized_us": 15.426999999999776,
+      "reduction_percent": 65.07848117312088,
+      "speedup": 2.8635638815064905,
+      "baseline_p99_us": 49.0,
+      "optimized_p99_us": 19.7
+    },
+    {
+      "size": "lite",
+      "block": 32,
+      "moving": true,
+      "baseline_us": 49.678199999999336,
+      "optimized_us": 18.530499999999655,
+      "reduction_percent": 62.698930315510815,
+      "speedup": 2.68088826529237,
+      "baseline_p99_us": 55.0,
+      "optimized_p99_us": 21.2
+    },
+    {
+      "size": "lite",
+      "block": 64,
+      "moving": false,
+      "baseline_us": 77.47499999999984,
+      "optimized_us": 29.471399999999402,
+      "reduction_percent": 61.96011616650602,
+      "speedup": 2.628819804963504,
+      "baseline_p99_us": 85.2,
+      "optimized_p99_us": 33.8
+    },
+    {
+      "size": "lite",
+      "block": 64,
+      "moving": true,
+      "baseline_us": 85.30980000000012,
+      "optimized_us": 33.55990000000048,
+      "reduction_percent": 60.66114326841648,
+      "speedup": 2.5420159178066353,
+      "baseline_p99_us": 109.7,
+      "optimized_p99_us": 41.3
+    },
+    {
+      "size": "lite",
+      "block": 128,
+      "moving": false,
+      "baseline_us": 142.98540000000025,
+      "optimized_us": 58.64989999999973,
+      "reduction_percent": 58.981896053723226,
+      "speedup": 2.437947890789258,
+      "baseline_p99_us": 225.0,
+      "optimized_p99_us": 72.2
+    },
+    {
+      "size": "lite",
+      "block": 128,
+      "moving": true,
+      "baseline_us": 146.54290000000043,
+      "optimized_us": 61.89170000000045,
+      "reduction_percent": 57.76547345521328,
+      "speedup": 2.36773105279059,
+      "baseline_p99_us": 193.2,
+      "optimized_p99_us": 82.1
+    },
+    {
+      "size": "lite",
+      "block": 256,
+      "moving": false,
+      "baseline_us": 260.80100000000004,
+      "optimized_us": 117.48950000000053,
+      "reduction_percent": 54.95051782776888,
+      "speedup": 2.2197813421624812,
+      "baseline_p99_us": 342.9,
+      "optimized_p99_us": 174.7
+    },
+    {
+      "size": "lite",
+      "block": 256,
+      "moving": true,
+      "baseline_us": 265.5838000000004,
+      "optimized_us": 124.61409999999982,
+      "reduction_percent": 53.079178775211574,
+      "speedup": 2.1312499949845223,
+      "baseline_p99_us": 333.0,
+      "optimized_p99_us": 253.2
+    }
+  ]
+}

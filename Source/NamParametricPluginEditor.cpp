@@ -4,9 +4,9 @@
 #include <chrono>
 #include <cmath>
 
+#include "TtsBranding.h"
 #include "UI/CalibrationSettingsComponent.h"
 #include "UI/NamColours.h"
-#include "TtsBranding.h"
 
 namespace {
 constexpr int kTopBarHeight = 110;
@@ -124,9 +124,8 @@ void NamParametricPluginAudioProcessorEditor::ShowModelChooser() {
   const juce::File currentModelFile(mProcessor.GetModelPath());
   const juce::File startDirectory =
       currentModelFile.existsAsFile() ? currentModelFile.getParentDirectory() : juce::File();
-  mModelChooser =
-      std::make_unique<juce::FileChooser>("Select a NAM or parametric model", startDirectory,
-                                         "*.nam;*.pnam");
+  mModelChooser = std::make_unique<juce::FileChooser>("Select a NAM or parametric model",
+                                                      startDirectory, "*.nam;*.pnam");
 
   const int chooserFlags =
       juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;
@@ -279,8 +278,8 @@ void NamParametricPluginAudioProcessorEditor::paint(juce::Graphics& g) {
 void NamParametricPluginAudioProcessorEditor::parentHierarchyChanged() {
   if (juce::JUCEApplicationBase::isStandaloneApp())
     if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
-      window->setIcon(juce::ImageCache::getFromMemory(TtsBranding::TTSLogo_png,
-                                                    TtsBranding::TTSLogo_pngSize));
+      window->setIcon(
+          juce::ImageCache::getFromMemory(TtsBranding::TTSLogo_png, TtsBranding::TTSLogo_pngSize));
 }
 
 void NamParametricPluginAudioProcessorEditor::resized() {
