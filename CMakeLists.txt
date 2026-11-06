@@ -165,12 +165,18 @@ foreach(wrapper_target IN ITEMS ${TARGET_NAME}_VST3 ${TARGET_NAME}_AU ${TARGET_N
         COMMAND ${CMAKE_COMMAND} -E copy
           "${CMAKE_CURRENT_LIST_DIR}/THIRD-PARTY-NOTICES.md"
           "$<TARGET_BUNDLE_CONTENT_DIR:${wrapper_target}>/Resources/THIRD-PARTY-NOTICES.md"
+        COMMAND ${CMAKE_COMMAND} -E copy
+          "${CMAKE_CURRENT_LIST_DIR}/CREDITS.md"
+          "$<TARGET_BUNDLE_CONTENT_DIR:${wrapper_target}>/Resources/CREDITS.md"
       )
     else()
       add_custom_command(TARGET ${wrapper_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy
           "${CMAKE_CURRENT_LIST_DIR}/THIRD-PARTY-NOTICES.md"
           "$<TARGET_FILE_DIR:${wrapper_target}>/THIRD-PARTY-NOTICES.md"
+        COMMAND ${CMAKE_COMMAND} -E copy
+          "${CMAKE_CURRENT_LIST_DIR}/CREDITS.md"
+          "$<TARGET_FILE_DIR:${wrapper_target}>/CREDITS.md"
       )
     endif()
   endif()
