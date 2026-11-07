@@ -110,7 +110,7 @@ jobs:
           if ($info.FileVersion -ne $version -or $info.ProductVersion -ne $version) { throw 'Binary version mismatch' }
           New-Item -ItemType Directory -Force -Path dist | Out-Null
 
-          Compress-Archive -Path "$artefactDir/Standalone/NAM Parametric Plugin.exe", "$artefactDir/Standalone/THIRD-PARTY-NOTICES.md" `
+          Compress-Archive -Path "$artefactDir/Standalone/NAM Parametric Plugin.exe", "$artefactDir/Standalone/THIRD-PARTY-NOTICES.md", "$artefactDir/Standalone/CREDITS.md" `
             -DestinationPath "dist/NAM-Parametric-Plugin-$version-Windows-Standalone.zip"
 
           Compress-Archive -Path "$artefactDir/VST3/NAM Parametric Plugin.vst3" `

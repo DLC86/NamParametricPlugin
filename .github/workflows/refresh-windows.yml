@@ -28,7 +28,7 @@ jobs:
           if (-not (Select-String -Path CMakeLists.txt -SimpleMatch 'VERSION 0.4.1)')) { throw 'Wrong binary version' }
           $root = 'build/windows-release/NamParametricPlugin_artefacts/Release'
           New-Item -ItemType Directory -Force dist | Out-Null
-          Compress-Archive -Path "$root/Standalone/NAM Parametric Plugin.exe", "$root/Standalone/THIRD-PARTY-NOTICES.md" -DestinationPath dist/NAM-Parametric-Plugin-0.4.1-Windows-Standalone.zip
+          Compress-Archive -Path "$root/Standalone/NAM Parametric Plugin.exe", "$root/Standalone/THIRD-PARTY-NOTICES.md", "$root/Standalone/CREDITS.md" -DestinationPath dist/NAM-Parametric-Plugin-0.4.1-Windows-Standalone.zip
           Compress-Archive -Path "$root/VST3/NAM Parametric Plugin.vst3" -DestinationPath dist/NAM-Parametric-Plugin-0.4.1-Windows-VST3.zip
           gh release upload v0.4.1 dist/NAM-Parametric-Plugin-0.4.1-Windows-Standalone.zip dist/NAM-Parametric-Plugin-0.4.1-Windows-VST3.zip --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Asset replacement failed' }

@@ -7,6 +7,20 @@ The TTS logo from NAM On Steroids is the application icon on all platforms.
 JUCE-based `VST3 + AU + Standalone` plugin for loading and running Neural Amp Modeler (`.nam` and `.pnam`) models,
 including parametric NAM models via `nam_core_parametric`.
 
+## Credits
+
+This fork is based on **[Phillip Self](https://github.com/phillipmself)**'s
+[NAM Parametric Plugin](https://github.com/phillipmself/NamParametricPlugin) and
+[NeuralAmpModelerCoreParametric](https://github.com/phillipmself/NeuralAmpModelerCoreParametric),
+which introduced its parametric plugin and inference foundations. The underlying
+NAM ecosystem and AudioDSPTools were created by **Steven Atkinson** and contributors.
+The current HyperA2 fast path also incorporates work derived from **Mike Oliphant**'s
+NeuralAudio. DLC86 maintains this fork and its extensions.
+
+See [CREDITS.md](CREDITS.md) for the full attribution overview and
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for license notices. Current release
+sources are maintained on [Knobs+Switch](https://github.com/DLC86/NamParametricPlugin/tree/Knobs%2BSwitch).
+
 ## Related Projects
 
 This plugin builds on two companion repositories:
