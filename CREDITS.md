@@ -1,6 +1,6 @@
 # Credits and acknowledgements
 
-Credits for the DLC86 NAM Parametric Plugin fork and its `Knobs+Switch` release
+Credits for the DLC86 NAM Parametric Plugin fork and its `main` release
 branch. This project builds on the following authors' work; attribution does not
 imply endorsement, and each component retains its original license.
 
@@ -45,5 +45,5 @@ Branding retains its owner's rights; the software licenses do not grant a
 separate trademark or logo license.
 
 For the released implementation, use the version tag or
-[Knobs+Switch](https://github.com/DLC86/NamParametricPlugin/tree/Knobs%2BSwitch)
+[main](https://github.com/DLC86/NamParametricPlugin/tree/main)
 and initialize its pinned submodules.

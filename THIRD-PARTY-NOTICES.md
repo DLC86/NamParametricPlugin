@@ -49,7 +49,7 @@ This project's open-source builds use JUCE's AGPLv3 option. JUCE's licensing
 requirements apply to distributions using that option; the original MIT notices
 on the plugin and NAM sources are preserved. Corresponding source for this fork
 is at https://github.com/DLC86/NamParametricPlugin, using the release's exact tag
-and pinned submodules. Current development/release sources are on `Knobs+Switch`.
+and pinned submodules. Current development/release sources are on `main`.
 JUCE's own licensing and dependency summary is retained in
 `external/JUCE/LICENSE.md`. Full notices for additional bundled components follow
 below.

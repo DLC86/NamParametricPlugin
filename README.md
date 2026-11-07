@@ -19,7 +19,7 @@ NeuralAudio. DLC86 maintains this fork and its extensions.
 
 See [CREDITS.md](CREDITS.md) for the full attribution overview and
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for license notices. Current release
-sources are maintained on [Knobs+Switch](https://github.com/DLC86/NamParametricPlugin/tree/Knobs%2BSwitch).
+sources are maintained on [main](https://github.com/DLC86/NamParametricPlugin/tree/main).
 
 ## Related Projects
 
