@@ -20,9 +20,9 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           grep -Fx "project(NamParametricPlugin VERSION $version)" CMakeLists.txt
-          gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft --prerelease --latest=false \
             --target "$GITHUB_SHA" --title "NAM Parametric Plugin $version" \
-            --notes "Version $version refreshes the interface with a #bf0000 red accent and neutral gray surfaces of similar brightness. The TTS logo from NAM On Steroids is the application icon. Includes the existing ASIO standalone backend, HyperA2 Full/Lite, .pnam and .nam support, calibration and Eco de-click. Audio behavior is unchanged. Windows x64 standalone and VST3; macOS universal standalone, VST3 and AU; Linux x86_64 standalone and VST3. Export, calibration and control-transition tests run on all platforms before publication."
+            --notes "Preview 0.4.5 adds measured clean output-volume curves from ParaNAM 0.6.3. Volume is applied after the neural network with 5 ms smoothing; Full/Lite, calibration, resampling and static export remain supported. Requires this version or a compatible runtime for models with ParametricOutputGain. Includes Windows standalone/VST3, universal macOS standalone/VST3/AU and Linux x86_64 standalone/VST3. This preview does not replace Latest."
   build-macos:
     needs: prepare
     runs-on: macos-15-intel
@@ -40,10 +40,10 @@ jobs:
         run: cmake --preset mac-release -DNAM_PARAMETRIC_BUILD_TESTS=ON
 
       - name: Build
-        run: cmake --build --preset mac-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_AU NamParametricPlugin_Standalone static_export_test
+        run: cmake --build --preset mac-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_AU NamParametricPlugin_Standalone static_export_test hyper_a2_engine_test
 
       - name: Verify audio, calibration and control smoothing
-        run: ctest --test-dir build/mac-release --output-on-failure -R '^static_export$'
+        run: ctest --test-dir build/mac-release --output-on-failure -R '^(static_export|hyper_a2_engine)$'
 
       - name: Package artifacts
         run: |
@@ -95,10 +95,10 @@ jobs:
         run: cmake --preset windows-release -DNAM_PARAMETRIC_BUILD_TESTS=ON
 
       - name: Build
-        run: cmake --build --preset windows-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_Standalone static_export_test
+        run: cmake --build --preset windows-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_Standalone static_export_test hyper_a2_engine_test
 
       - name: Verify audio, calibration and control smoothing
-        run: ctest --test-dir build/windows-release --output-on-failure -R '^static_export$'
+        run: ctest --test-dir build/windows-release --output-on-failure -R '^(static_export|hyper_a2_engine)$'
 
       - name: Package artifacts
         shell: pwsh
@@ -157,5 +157,5 @@ jobs:
               'Linux-x86_64-Standalone.tar.gz', 'Linux-x86_64-VST3.tar.gz')}
           assert {a['name'] for a in release['assets']} == expected
           assert all(a['state'] == 'uploaded' and a['size'] > 0 for a in release['assets'])
-          subprocess.run(['gh', 'release', 'edit', tag, '--draft=false'], check=True)
+          subprocess.run(['gh', 'release', 'edit', tag, '--draft=false', '--prerelease', '--latest=false'], check=True)
           PY

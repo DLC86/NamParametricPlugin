@@ -140,6 +140,29 @@ nlohmann::json BakeWaveNet(const nlohmann::json& source, std::span<const float> 
 nlohmann::json NamModelEngine::BakeStaticModel(const nlohmann::json& source,
                                                const std::span<const float> values,
                                                const std::string& sourceFileName) {
+  if (source.at("architecture")=="ParametricOutputGain") {
+    auto base=pnam::OutputGainCurve::Unwrap(source);
+    pnam::OutputGainCurve curve;
+    curve.Load(source.at("config").at("output_gain"),base.at("config").at("params").size());
+    if (values.size()!=base.at("config").at("params").size()+1)
+      throw std::runtime_error("Output-volume export control count mismatch");
+    for (float value:values) if (!std::isfinite(value)) throw std::runtime_error("Nonfinite control value");
+    if (values[curve.index]<curve.minimum || values[curve.index]>curve.maximum)
+      throw std::runtime_error("Output-volume value outside range");
+    std::vector<float> neural;
+    for (size_t i=0;i<values.size();++i) if (i!=curve.index) neural.push_back(values[i]);
+    auto baked=BakeStaticModel(base,neural,sourceFileName);
+    const double gain=curve.Evaluate(values[curve.index]);
+    const auto scale=[gain](nlohmann::json& model) {
+      model["config"]["head_scale"]=model["config"].value("head_scale",1.0)*gain;
+      model["metadata"]["nam_parametric_plugin"]["static_export"]["output_gain"] = gain;
+    };
+    if (baked.at("architecture")=="SlimmableContainer")
+      for (auto& child:baked["config"]["submodels"]) scale(child["model"]);
+    else scale(baked);
+    auto checked=nam::get_dsp(baked);
+    return baked;
+  }
   const auto architecture = source.at("architecture").get<std::string>();
   nlohmann::json result;
   if (architecture == "HyperWaveNet") {
@@ -209,12 +232,16 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
       throw std::runtime_error("Could not open model file.");
     }
     auto config = nlohmann::json::parse(stream);
+    const auto original = config;
+    const bool gainWrapped = config.at("architecture") == "ParametricOutputGain";
+    config = pnam::OutputGainCurve::Unwrap(config);
+    pnam::OutputGainCurve outputGain;
     const bool hyperA2 = config.at("architecture") == "HyperA2";
     const bool staticA2 = IsStaticA2Container(config);
     const bool supportsSizeSelection = hyperA2 || staticA2;
     std::shared_ptr<const nlohmann::json> exportSource;
     if (hyperA2 || config.at("architecture") == "HyperWaveNet")
-      exportSource = std::make_shared<const nlohmann::json>(config);
+      exportSource = std::make_shared<const nlohmann::json>(gainWrapped ? original : config);
     if (hyperA2) {
       config = SelectHyperA2Branch(config, size);
     } else if (staticA2) {
@@ -282,6 +309,18 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
         }
       }
     }
+    if (gainWrapped) {
+      outputGain.Load(original.at("config").at("output_gain"),loadedValues.size());
+      for (const auto& p : loadedParams)
+        if (p.name==outputGain.name) throw std::runtime_error("Output-volume control is already a neural parameter");
+      loadedParams.insert(loadedParams.begin()+static_cast<std::ptrdiff_t>(outputGain.index),
+        ModelParameterInfo{outputGain.name,static_cast<float>(outputGain.minimum),static_cast<float>(outputGain.maximum),static_cast<float>(outputGain.defaultValue),{}});
+    }
+    mOutputGain=std::move(outputGain);
+    mGainTarget=mGainCurrent=mOutputGain.Evaluate(mOutputGain.defaultValue);
+    mGainNeuralValues=loadedValues;
+    mControlValues=loadedValues;
+    if (mOutputGain.enabled) mControlValues.insert(mControlValues.begin()+static_cast<std::ptrdiff_t>(mOutputGain.index),mOutputGain.defaultValue);
     mModel = std::move(loadedModel);
     mTransitionModel = std::move(transitionModel);
     mTransitionControl = dynamic_cast<nam::IParametricControl*>(mTransitionModel.get());
@@ -308,6 +347,8 @@ void NamModelEngine::Reset(double sampleRate, int maxBlockSize) {
   }
 
   mHostSampleRate = sampleRate;
+  mGainAlpha=1-std::exp(-1/(0.005*sampleRate));
+  mGainCurrent=mGainTarget;
   mMaxExternalBlockSize = maxBlockSize;
   mFadeLength =
       std::max(2, static_cast<int>(std::lround(GetModelSampleRateForProcessing() * 0.050)));
@@ -518,11 +559,13 @@ void NamModelEngine::Process(float* input, float* output, int numSamples) {
 
   if (!NeedToResample() || mResamplerState == nullptr) {
     ProcessModel(input, output, numSamples);
+    ApplyOutputGain(output,numSamples);
     return;
   }
 
   mResamplerState->resampler.ProcessBlock(inputPtrs, outputPtrs, numSamples,
                                           mResamplerState->blockProcessFunc);
+  ApplyOutputGain(output,numSamples);
 }
 
 double NamModelEngine::GetExpectedSampleRate() const {
@@ -559,9 +602,40 @@ const std::vector<ModelParameterInfo>& NamModelEngine::GetParameterInfos() const
   return mParameterInfos;
 }
 
-const std::vector<float>& NamModelEngine::GetParameterValues() const { return mParameterValues; }
+const std::vector<float>& NamModelEngine::GetParameterValues() const { return mOutputGain.enabled ? mControlValues : mParameterValues; }
+
+void NamModelEngine::ApplyOutputGain(float* output,int samples) noexcept {
+  if (!mOutputGain.enabled) return;
+  for (int i=0;i<samples;++i) {
+    mGainCurrent += mGainAlpha*(mGainTarget-mGainCurrent);
+    if (std::abs(mGainTarget-mGainCurrent)<1e-9) mGainCurrent=mGainTarget;
+    output[i] *= static_cast<float>(mGainCurrent);
+  }
+}
 
 bool NamModelEngine::SetParameterValues(const std::span<const float> values) noexcept {
+  if (mOutputGain.enabled) {
+    if (!mParametricControl || values.size()!=mControlValues.size()) return false;
+    size_t n=0;
+    bool changed=false;
+    for (size_t i=0;i<values.size();++i) {
+      const auto& p=mParameterInfos[i];
+      if (!std::isfinite(values[i]) || values[i]<p.minValue || values[i]>p.maxValue ||
+          (p.IsSwitch() && std::round(values[i])!=values[i])) return false;
+    }
+    for (size_t i=0;i<values.size();++i) if (i!=mOutputGain.index) {
+      mGainNeuralValues[n]=values[i];
+      changed |= mParameterValues[n]!=values[i];
+      ++n;
+    }
+    try {
+      if (changed && !mTransitionControl) mParametricControl->SetParams(mGainNeuralValues);
+      std::copy(mGainNeuralValues.begin(),mGainNeuralValues.end(),mParameterValues.begin());
+      std::copy(values.begin(),values.end(),mControlValues.begin());
+      mGainTarget=mOutputGain.Evaluate(values[mOutputGain.index]);
+      return true;
+    } catch (...) {return false;}
+  }
   if (mParametricControl == nullptr || values.size() != mParameterValues.size()) {
     return false;
   }

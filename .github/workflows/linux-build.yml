@@ -40,9 +40,9 @@ jobs:
           -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld -DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld
           -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld -DNAM_PARAMETRIC_BUILD_TESTS=ON
       - name: Build
-        run: cmake --build build/linux-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_Standalone static_export_test
+        run: cmake --build build/linux-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_Standalone static_export_test hyper_a2_engine_test
       - name: Verify export, calibration and smooth controls
-        run: xvfb-run -a ctest --test-dir build/linux-release --output-on-failure -R '^static_export$'
+        run: xvfb-run -a ctest --test-dir build/linux-release --output-on-failure -R '^(static_export|hyper_a2_engine)$'
       - name: Check runtime libraries and package
         run: |
           set -euo pipefail

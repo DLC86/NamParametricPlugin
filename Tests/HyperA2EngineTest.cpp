@@ -46,6 +46,47 @@ void Compare(const std::vector<float>& actual, const std::vector<float>& expecte
   std::cout << "PyTorch parity max_error=" << maximum << '\n';
 }
 
+void TestOutputVolume(const std::filesystem::path& directory, const nlohmann::json& base,
+                      const std::vector<float>& input) {
+  const nlohmann::json curve = {{"schema_version",1},{"name","Volume"},{"index",1},
+    {"min",0.1},{"max",10.1},{"default",5.1},{"interpolation","pchip"},
+    {"points",{{0.1,0.0},{10.1,1.0}}},
+    {"segments",{{{"left",0.1},{"right",10.1},{"coefficients",{0.,0.,0.1,0.}}}}}};
+  auto wrapped = base;
+  wrapped["architecture"] = "ParametricOutputGain";
+  wrapped["config"] = {{"base_architecture",base["architecture"]},
+                         {"base_config",base["config"]},{"output_gain",curve}};
+  const auto path=directory/"output_volume_test.pnam";
+  { std::ofstream file(path); file << wrapped; }
+  NamModelEngine engine, reference;
+  std::string error;
+  Check(engine.LoadModel(path.string(),error),error);
+  Check(engine.GetParameterInfos().size()==3 && engine.GetParameterInfos()[1].name=="Volume",
+        "Output volume was not inserted at its physical control index");
+  Check(reference.LoadModel((directory/"hyper_a2_low_rank.nam").string(),error),error);
+  for (auto size : {ModelSize::Full,ModelSize::Lite}) {
+    Check(engine.LoadModel(path.string(),error,size),error);
+    Check(reference.LoadModel((directory/"hyper_a2_low_rank.nam").string(),error,size),error);
+    Check(engine.SetParameterValues(std::vector<float>{2,5.1f,0}),"Volume control rejected");
+    Check(reference.SetParameterValues(std::vector<float>{2,0}),"Neural controls rejected");
+    auto expected=Render(reference,input);
+    for (auto& value:expected) value*=.5f;
+    Compare(Render(engine,input),expected);
+    Check(!engine.SetParameterValues(std::vector<float>{2,11,0}),"Invalid volume accepted");
+    Check(engine.SetParameterValues(std::vector<float>{2,.1f,0}),"Mute rejected");
+    auto silent=Render(engine,input);
+    Check(std::all_of(silent.begin(),silent.end(),[](float x){return std::abs(x)<1e-8;}),"Volume minimum did not mute");
+  }
+  const auto baked=NamModelEngine::BakeStaticModel(wrapped,std::vector<float>{2,5.1f,0},"volume.pnam");
+  Check(baked.at("architecture")=="SlimmableContainer","Output-volume static export lost Full/Lite");
+  auto malformed=curve;
+  malformed["segments"][0]["coefficients"][2]=-1;
+  bool rejected=false;
+  try { pnam::OutputGainCurve bad; bad.Load(malformed,2); } catch (...) {rejected=true;}
+  Check(rejected,"Nonmonotone volume polynomial accepted");
+  std::filesystem::remove(path);
+}
+
 void TestMalformedFiles(const std::filesystem::path& directory, const nlohmann::json& original) {
   for (int fault = 0; fault < 6; ++fault) {
     auto invalid = original;
@@ -158,6 +199,7 @@ int main(int argc, const char* const* argv) {
       }
     }
     TestMalformedFiles(directory, Read(directory / "hyper_a2_low_rank.nam"));
+    TestOutputVolume(directory, Read(directory / "hyper_a2_low_rank.nam"), input);
     TestCalibration(directory);
     std::cout << "HyperA2 Full/Lite engine tests passed\n";
   } catch (const std::exception& error) {

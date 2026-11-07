@@ -7,6 +7,7 @@
 
 #include "dsp.h"
 #include "parametric_control.h"
+#include "DSP/OutputGainCurve.h"
 
 namespace namparametric::dsp {
 
@@ -60,6 +61,10 @@ class NamModelEngine {
   void ProcessModelInternal(float* input, float* output, int numSamples);
   void ProcessEco(float* input, float* output, int numSamples);
 
+  pnam::OutputGainCurve mOutputGain;
+  std::vector<float> mControlValues, mGainNeuralValues;
+  double mGainTarget=1, mGainCurrent=1, mGainAlpha=1;
+  void ApplyOutputGain(float* output,int samples) noexcept;
   std::unique_ptr<nam::DSP> mModel;
   // Both histories keep receiving the same audio. Only the inaudible network
   // receives new weights; a sample-continuous fade then exchanges their roles.
