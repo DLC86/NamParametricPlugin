@@ -226,6 +226,37 @@ struct NamModelEngine::ResamplerState {
 NamModelEngine::NamModelEngine() = default;
 NamModelEngine::~NamModelEngine() = default;
 
+
+void AssignDisplayIndices(std::vector<ModelParameterInfo>& loadedParams,
+                          const nlohmann::json& original, const pnam::OutputGainCurve& volume) {
+  // The neural parameter array is positional: only the GUI may use the optional indices.
+  for (size_t i = 0; i < loadedParams.size(); ++i) loadedParams[i].displayIndex = i;
+  const auto base = pnam::OutputGainCurve::NeuralSource(original);
+  const auto& stored = base.at("config").at("params");
+  if (stored.size() + (volume.enabled ? 1u : 0u) != loadedParams.size())
+    throw std::runtime_error("Display control count differs from neural controls");
+  const bool indexed = std::any_of(stored.begin(), stored.end(),
+      [](const nlohmann::json& entry) { return entry.contains("index"); });
+  if (!indexed) return;  // Legacy models keep the historical neural + Volume order.
+  std::vector<bool> seen(loadedParams.size(), false);
+  size_t neuralIndex = 0;
+  for (size_t native = 0; native < loadedParams.size(); ++native) {
+    size_t display = native;
+    if (!volume.enabled || native != volume.index) {
+      const auto& entry = stored.at(neuralIndex++);
+      if (!entry.contains("index") || !entry.at("index").is_number_integer())
+        throw std::runtime_error("All neural controls must have integer display indices");
+      const auto value = entry.at("index").get<int>();
+      if (value < 0 || static_cast<size_t>(value) >= loadedParams.size())
+        throw std::runtime_error("Neural display index out of range");
+      display = static_cast<size_t>(value);
+    }
+    if (seen[display]) throw std::runtime_error("Duplicate control display index");
+    seen[display] = true;
+    loadedParams[native].displayIndex = display;
+  }
+}
+
 bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorMessage,
                                const ModelSize size) {
   errorMessage.clear();
@@ -323,6 +354,7 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
       loadedParams.insert(loadedParams.begin()+static_cast<std::ptrdiff_t>(outputGain.index),
         ModelParameterInfo{outputGain.name,static_cast<float>(outputGain.minimum),static_cast<float>(outputGain.maximum),static_cast<float>(outputGain.defaultValue),{}});
     }
+    AssignDisplayIndices(loadedParams, original, outputGain);
     mOutputGain=std::move(outputGain);
     mGainTarget=mGainCurrent=mOutputGain.Evaluate(mOutputGain.defaultValue);
     mGainNeuralValues=loadedValues;
