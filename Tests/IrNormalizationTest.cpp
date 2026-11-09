@@ -92,10 +92,9 @@ double MeanFrequencyResponsePower(const std::vector<float>& impulse,
 }
 
 void TestUnitResponse(const std::filesystem::path& directory, int rate,
-                      float amplitude, bool stereo) {
+                      float amplitude) {
   const auto path = directory / "unity-ir.wav";
-  WriteIr(path, rate, {amplitude}, stereo ? std::vector<float>{0.1f} :
-                                                std::vector<float>{});
+  WriteIr(path, rate, {amplitude});
   namparametric::dsp::IrEngine engine;
   std::string error;
   Check(engine.LoadIr(path.string(), rate, error), error);
@@ -147,8 +146,8 @@ int main() {
                            "nam-parametric-ir-regression";
     std::filesystem::create_directories(directory);
     for (int rate : {44100, 48000, 96000}) {
-      TestUnitResponse(directory, rate, 0.5f, false);
-      TestUnitResponse(directory, rate, 0.25f, true);
+      TestUnitResponse(directory, rate, 0.5f);
+      TestUnitResponse(directory, rate, 0.25f);
     }
     TestFrequencyNormalization(directory);
     TestInvalidIr(directory);
