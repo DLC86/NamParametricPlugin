@@ -56,9 +56,13 @@ void TestOutputVolume(const std::filesystem::path& directory, const nlohmann::js
   wrapped["architecture"] = "ParametricOutputGain";
   wrapped["config"] = {{"base_architecture",base["architecture"]},
                          {"base_config",base["config"]},{"output_gain",curve}};
+  auto extended = base;
+  extended["architecture"] = "ParametricSlimmableContainer";
+  extended["extensions"]["linear_volume"] = curve;
   const auto path=directory/"output_volume_test.pnam";
-  { std::ofstream file(path); file << wrapped; }
-  NamModelEngine engine, reference;
+  for (const auto& source : {wrapped, extended}) {
+    { std::ofstream file(path); file << source; }
+    NamModelEngine engine, reference;
   std::string error;
   Check(engine.LoadModel(path.string(),error),error);
   Check(engine.GetParameterInfos().size()==3 && engine.GetParameterInfos()[1].name=="Volume",
@@ -77,13 +81,29 @@ void TestOutputVolume(const std::filesystem::path& directory, const nlohmann::js
     auto silent=Render(engine,input);
     Check(std::all_of(silent.begin(),silent.end(),[](float x){return std::abs(x)<1e-8;}),"Volume minimum did not mute");
   }
-  const auto baked=NamModelEngine::BakeStaticModel(wrapped,std::vector<float>{2,5.1f,0},"volume.pnam");
+  const auto baked=NamModelEngine::BakeStaticModel(source,std::vector<float>{2,5.1f,0},"volume.pnam");
   Check(baked.at("architecture")=="SlimmableContainer","Output-volume static export lost Full/Lite");
   auto malformed=curve;
   malformed["segments"][0]["coefficients"][2]=-1;
   bool rejected=false;
   try { pnam::OutputGainCurve bad; bad.Load(malformed,2); } catch (...) {rejected=true;}
   Check(rejected,"Nonmonotone volume polynomial accepted");
+  }
+  // Also confirm that the new container works without a volume extension.
+  { std::ofstream file(path); file << extended; }
+  std::filesystem::remove(path);
+  const auto renamedPath=directory/"renamed_container.pnam";
+  auto bare=base;
+  bare["architecture"]="ParametricSlimmableContainer";
+  { std::ofstream file(renamedPath); file << bare; }
+  for (auto size : {ModelSize::Full, ModelSize::Lite}) {
+    NamModelEngine renamed, original;
+    std::string error;
+    Check(renamed.LoadModel(renamedPath.string(),error,size),error);
+    Check(original.LoadModel((directory/"hyper_a2_low_rank.nam").string(),error,size),error);
+    Compare(Render(renamed,input),Render(original,input));
+  }
+  std::filesystem::remove(renamedPath);
   std::filesystem::remove(path);
 }
 
