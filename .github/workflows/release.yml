@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*.*.*"
@@ -22,7 +23,7 @@ jobs:
           grep -Fx "project(NamParametricPlugin VERSION $version)" CMakeLists.txt
           gh release create "$GITHUB_REF_NAME" --verify-tag --draft --prerelease --latest=false \
             --target "$GITHUB_SHA" --title "NAM Parametric Plugin $version" \
-            --notes "Preview 0.5.0 adds ParametricSlimmableContainer support and optional extensions.linear_volume while retaining legacy HyperA2 and ParametricOutputGain models. IR playback now uses the same 100-5000 Hz spectral power normalization as ParaNAM Trainer Compare, removing AudioDSPTools\u0027 fixed -18 dB level drop. Full/Lite, calibration and static baking remain supported. Includes Windows standalone/VST3, universal macOS standalone/VST3/AU and Linux x86_64 standalone/VST3. This preview does not replace Latest."
+            --notes-file docs/release-0.5.0.md
   build-macos:
     needs: prepare
     runs-on: macos-15-intel
