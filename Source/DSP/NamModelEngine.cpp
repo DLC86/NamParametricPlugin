@@ -140,10 +140,10 @@ nlohmann::json BakeWaveNet(const nlohmann::json& source, std::span<const float> 
 nlohmann::json NamModelEngine::BakeStaticModel(const nlohmann::json& source,
                                                const std::span<const float> values,
                                                const std::string& sourceFileName) {
-  if (source.at("architecture")=="ParametricOutputGain") {
-    auto base=pnam::OutputGainCurve::Unwrap(source);
+  if (const auto* gainConfig = pnam::OutputGainCurve::FindConfig(source)) {
+    auto base=pnam::OutputGainCurve::NeuralSource(source);
     pnam::OutputGainCurve curve;
-    curve.Load(source.at("config").at("output_gain"),base.at("config").at("params").size());
+    curve.Load(*gainConfig,base.at("config").at("params").size());
     if (values.size()!=base.at("config").at("params").size()+1)
       throw std::runtime_error("Output-volume export control count mismatch");
     for (float value:values) if (!std::isfinite(value)) throw std::runtime_error("Nonfinite control value");
@@ -167,7 +167,8 @@ nlohmann::json NamModelEngine::BakeStaticModel(const nlohmann::json& source,
   nlohmann::json result;
   if (architecture == "HyperWaveNet") {
     result = BakeWaveNet(source, values);
-  } else if (architecture == "HyperA2") {
+  } else if (architecture == "HyperA2" ||
+             architecture == "ParametricSlimmableContainer") {
     result = source;
     result["version"] = nam::LATEST_FULLY_SUPPORTED_NAM_FILE_VERSION;
     result["architecture"] = "SlimmableContainer";
@@ -180,7 +181,7 @@ nlohmann::json NamModelEngine::BakeStaticModel(const nlohmann::json& source,
                {"model", BakeWaveNet(SelectHyperA2Branch(source, ModelSize::Full), values)}}})}};
     result["weights"] = nlohmann::json::array();
   } else {
-    throw std::runtime_error("Static export supports HyperWaveNet and HyperA2 models only.");
+    throw std::runtime_error("Static export supports HyperWaveNet and parametric containers only.");
   }
   const auto specs = nam::parse_param_specs(source.at("config"), architecture);
   nlohmann::json controls = nlohmann::json::array();
@@ -195,7 +196,9 @@ nlohmann::json NamModelEngine::BakeStaticModel(const nlohmann::json& source,
                                {"source_file", sourceFileName},
                                {"source_architecture", architecture},
                                {"controls", controls}};
-  if (architecture == "HyperA2") provenance["variants"] = {"lite", "full"};
+  if (architecture == "HyperA2" ||
+      architecture == "ParametricSlimmableContainer")
+    provenance["variants"] = {"lite", "full"};
   const auto addMetadata = [&provenance](nlohmann::json& model) {
     if (!model.contains("metadata") || !model["metadata"].is_object())
       model["metadata"] = nlohmann::json::object();
@@ -204,7 +207,8 @@ nlohmann::json NamModelEngine::BakeStaticModel(const nlohmann::json& source,
     custom["static_export"] = provenance;
   };
   addMetadata(result);
-  if (architecture == "HyperA2") {
+  if (architecture == "HyperA2" ||
+      architecture == "ParametricSlimmableContainer") {
     for (auto& entry : result["config"]["submodels"]) addMetadata(entry["model"]);
   }
   // Validate the stock file before any destination is created or replaced.
@@ -233,10 +237,13 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
     }
     auto config = nlohmann::json::parse(stream);
     const auto original = config;
-    const bool gainWrapped = config.at("architecture") == "ParametricOutputGain";
-    config = pnam::OutputGainCurve::Unwrap(config);
+    const auto* gainConfig = pnam::OutputGainCurve::FindConfig(original);
+    const bool gainWrapped = gainConfig != nullptr;
+    config = pnam::OutputGainCurve::NeuralSource(config);
     pnam::OutputGainCurve outputGain;
-    const bool hyperA2 = config.at("architecture") == "HyperA2";
+    const auto architecture = config.at("architecture").get<std::string>();
+    const bool hyperA2 = architecture == "HyperA2" ||
+                         architecture == "ParametricSlimmableContainer";
     const bool staticA2 = IsStaticA2Container(config);
     const bool supportsSizeSelection = hyperA2 || staticA2;
     std::shared_ptr<const nlohmann::json> exportSource;
@@ -310,7 +317,7 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
       }
     }
     if (gainWrapped) {
-      outputGain.Load(original.at("config").at("output_gain"),loadedValues.size());
+      outputGain.Load(*gainConfig,loadedValues.size());
       for (const auto& p : loadedParams)
         if (p.name==outputGain.name) throw std::runtime_error("Output-volume control is already a neural parameter");
       loadedParams.insert(loadedParams.begin()+static_cast<std::ptrdiff_t>(outputGain.index),
