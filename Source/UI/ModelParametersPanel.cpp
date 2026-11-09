@@ -46,6 +46,21 @@ ModelParametersPanel::ModelParametersPanel() {
 void ModelParametersPanel::RebuildControls(const std::vector<RuntimeParameterInfo>& params,
                                            const std::vector<double>& initialValues) {
   mControls.clear();
+  // Preserve the original parameter indices for callbacks, state and export.
+  mVisualOrder.assign(params.size(), 0);
+  std::vector<bool> occupied(params.size(), false);
+  bool validOrder = true;
+  for (size_t native = 0; native < params.size(); ++native) {
+    const size_t display = params[native].displayIndex;
+    if (display >= params.size() || occupied[display]) {
+      validOrder = false;
+      break;
+    }
+    occupied[display] = true;
+    mVisualOrder[display] = native;
+  }
+  if (!validOrder)
+    for (size_t i = 0; i < params.size(); ++i) mVisualOrder[i] = i;
   mContent.removeAllChildren();
   mContent.addAndMakeVisible(mEmptyLabel);
 
@@ -180,7 +195,8 @@ void ModelParametersPanel::LayoutContent() {
   std::vector<std::pair<ParamControl*, int>> currentRow;
   int currentRowWidth = 0;
 
-  for (auto& control : mControls) {
+  for (size_t native : mVisualOrder) {
+    auto& control = mControls[native];
     const int cellWidth = control.isSwitch ? juce::jmax(kSwitchCellMinWidth,
                                                         control.switchControl->getPreferredWidth())
                                            : kKnobCellWidth;
