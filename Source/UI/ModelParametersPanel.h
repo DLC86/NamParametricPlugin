@@ -41,6 +41,7 @@ class ModelParametersPanel final : public juce::Component {
   juce::Component mContent;
   juce::Label mEmptyLabel;
   std::vector<ParamControl> mControls;
+  std::vector<size_t> mVisualOrder;  // display slot -> original runtime parameter index
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModelParametersPanel)
 };
