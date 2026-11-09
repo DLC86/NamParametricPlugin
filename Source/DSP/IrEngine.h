@@ -25,6 +25,7 @@ class IrEngine {
  private:
   std::unique_ptr<::dsp::ImpulseResponse> mIr;
   double mSampleRate = 48000.0;
+  double mNormalizationGain = 1.0;
   std::vector<double> mInputConversionScratch;
 };
 
