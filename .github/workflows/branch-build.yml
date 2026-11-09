@@ -19,6 +19,7 @@ on:
     branches: [main, codex/hyper-a2-support]
     paths:
       - '.github/workflows/branch-build.yml'
+      - '.github/workflows/linux-build.yml'
       - 'CMakeLists.txt'
       - 'Source/**'
       - 'Tests/**'
