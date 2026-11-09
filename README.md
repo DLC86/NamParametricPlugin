@@ -1,8 +1,24 @@
 # NamParametricPlugin
 
-Version 0.4.3 refreshes the interface with a #bf0000 red accent and neutral gray
-surfaces, preserving the previous surface brightness. Audio behavior is unchanged.
-The TTS logo from NAM On Steroids is the application icon on all platforms.
+**Version 0.5.0** adds support for new
+`ParametricSlimmableContainer` models (while still loading older `HyperA2`
+and `ParametricOutputGain` files), plus optional
+`extensions.linear_volume` output attenuation. The measured Linear Volume
+curve is evaluated after the neural model, with click-free smoothing;
+Full/Lite, calibration, and static export remain supported.
+
+The IR loader now compensates for AudioDSPTools' built-in −18 dB gain and
+normalizes IR response using the same **64 log-spaced 100–5000 Hz band-power**
+target as ParaNAM Trainer's **Compare** page. This targets a **0 dB mean
+spectral gain**, not identical perceived loudness at every frequency. The
+correction is computed off the real-time audio thread and recalculated
+whenever the sample rate changes. Unlike previous versions, enabling an IR
+should no longer cause an unexplained large drop in output level.
+IR convolution is still a separate optional stage and the plugin's output
+gain knob remains independent.
+
+The prior interface update introduced a #bf0000 red accent, neutral-gray
+surfaces and the TTS/NAM On Steroids logo.
 
 JUCE-based `VST3 + AU + Standalone` plugin for loading and running Neural Amp Modeler (`.nam` and `.pnam`) models,
 including parametric NAM models via `nam_core_parametric`.
