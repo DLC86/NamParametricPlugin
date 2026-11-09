@@ -128,3 +128,89 @@ jobs:
           name: linux-artifacts
           path: dist/*
           if-no-files-found: error
+
+      - name: Check runtime libraries and package
+        run: |
+          set -euo pipefail
+          root=build/linux-release/NamParametricPlugin_artefacts/Release
+          version=$(sed -n 's/^project(NamParametricPlugin VERSION \([^)]*\)).*/\1/p' CMakeLists.txt)
+          mkdir -p dist
+          for binary in "$root/Standalone/NAM Parametric Plugin" \
+            "$root/VST3/NAM Parametric Plugin.vst3/Contents/x86_64-linux/NAM Parametric Plugin.so"; do
+            file "$binary" | grep 'ELF 64-bit.*x86-64'
+            ldd "$binary" | tee -a dist/runtime-libraries.txt
+          done
+          if grep -q 'not found' dist/runtime-libraries.txt; then exit 1; fi
+          tar -czf "dist/NAM-Parametric-Plugin-$version-Linux-x86_64-Standalone.tar.gz" \
+            -C "$root/Standalone" 'NAM Parametric Plugin' THIRD-PARTY-NOTICES.md
+          tar -czf "dist/NAM-Parametric-Plugin-$version-Linux-x86_64-VST3.tar.gz" \
+            -C "$root/VST3" 'NAM Parametric Plugin.vst3'
+          for package in dist/*.tar.gz; do tar -tzf "$package"; done
+      - name: Attach Linux packages to the matching release
+        if: inputs.upload_release
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/releases" --paginate --slurp > "$RUNNER_TEMP/releases.json"
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          pages = json.loads((Path(os.environ['RUNNER_TEMP']) / 'releases.json').read_text())
+          matches = [r for page in pages for r in page if r['tag_name'] == os.environ['RELEASE_TAG']]
+          assert len(matches) == 1
+          release = matches[0]
+          revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert release['tag_name'] == os.environ['RELEASE_TAG']
+          assert release['target_commitish'] == revision, 'Release and binary source must match'
+          PY
+          gh release upload "$RELEASE_TAG" dist/*.tar.gz
+      - name: Preserve packages and runtime report
+        if: always() && !inputs.upload_release
+        uses: actions/upload-artifact@v4
+        continue-on-error: ${{ inputs.upload_release }}
+        with:
+          name: linux-artifacts
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Check runtime libraries and package
+        run: |
+          set -euo pipefail
+          root=build/linux-release/NamParametricPlugin_artefacts/Release
+          version=$(sed -n 's/^project(NamParametricPlugin VERSION \([^)]*\)).*/\1/p' CMakeLists.txt)
+          mkdir -p dist
+          for binary in "$root/Standalone/NAM Parametric Plugin" \
+            "$root/VST3/NAM Parametric Plugin.vst3/Contents/x86_64-linux/NAM Parametric Plugin.so"; do
+            file "$binary" | grep 'ELF 64-bit.*x86-64'
+            ldd "$binary" | tee -a dist/runtime-libraries.txt
+          done
+          if grep -q 'not found' dist/runtime-libraries.txt; then exit 1; fi
+          tar -czf "dist/NAM-Parametric-Plugin-$version-Linux-x86_64-Standalone.tar.gz" \
+            -C "$root/Standalone" 'NAM Parametric Plugin' THIRD-PARTY-NOTICES.md
+          tar -czf "dist/NAM-Parametric-Plugin-$version-Linux-x86_64-VST3.tar.gz" \
+            -C "$root/VST3" 'NAM Parametric Plugin.vst3'
+          for package in dist/*.tar.gz; do tar -tzf "$package"; done
+      - name: Attach Linux packages to the matching release
+        if: inputs.upload_release
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/releases" --paginate --slurp > "$RUNNER_TEMP/releases.json"
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          pages = json.loads((Path(os.environ['RUNNER_TEMP']) / 'releases.json').read_text())
+          matches = [r for page in pages for r in page if r['tag_name'] == os.environ['RELEASE_TAG']]
+          assert len(matches) == 1
+          release = matches[0]
+          revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert release['tag_name'] == os.environ['RELEASE_TAG']
+          assert release['target_commitish'] == revision, 'Release and binary source must match'
+          PY
+          gh release upload "$RELEASE_TAG" dist/*.tar.gz
+      - name: Preserve packages and runtime report
+        if: always() && !inputs.upload_release
+        uses: actions/upload-artifact@v4
+        continue-on-error: ${{ inputs.upload_release }}
+        with:
+          name: linux-artifacts
+          path: dist/*
+          if-no-files-found: error
