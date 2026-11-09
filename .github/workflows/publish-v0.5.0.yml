@@ -22,7 +22,7 @@ jobs:
       - name: Check release inputs
         run: |
           grep -Fx "project(NamParametricPlugin VERSION 0.5.0)" CMakeLists.txt
-          test -s docs/release-0.5.0.md
+          grep -F -- 'RELEASE_NOTES: |' .github/workflows/release.yml
       - name: Create immutable version tag and dispatch release workflow
         env:
           GH_TOKEN: ${{ github.token }}
@@ -30,8 +30,8 @@ jobs:
           TAG: v0.5.0
         run: |
           set -euo pipefail
-          existing=$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq ".object.sha" 2>/dev/null || true)
-          if [ -n "$existing" ]; then
+          if gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq ".object.sha" > "$RUNNER_TEMP/existing-tag-sha" 2>/dev/null; then
+            existing=$(cat "$RUNNER_TEMP/existing-tag-sha")
             test "$existing" = "$GITHUB_SHA" || { echo "Tag already exists at a different commit" >&2; exit 1; }
           else
             gh api --method POST "repos/$GH_REPO/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$GITHUB_SHA"
