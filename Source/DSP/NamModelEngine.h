@@ -21,6 +21,8 @@ struct ModelParameterInfo {
   float maxValue = 0.0f;
   float defaultValue = 0.0f;
   std::vector<std::string> enumNames;
+  // GUI order only; original positional neural indices must never change.
+  size_t displayIndex = 0;
 
   [[nodiscard]] bool IsSwitch() const { return !enumNames.empty(); }
 };
