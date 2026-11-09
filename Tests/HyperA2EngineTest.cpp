@@ -89,6 +89,38 @@ void TestOutputVolume(const std::filesystem::path& directory, const nlohmann::js
   try { pnam::OutputGainCurve bad; bad.Load(malformed,2); } catch (...) {rejected=true;}
   Check(rejected,"Nonmonotone volume polynomial accepted");
   }
+
+  // Reordered GUI positions must not change runtime control indices or audio.
+  auto indexed=extended;
+  indexed["config"]["params"][0]["index"]=2;
+  indexed["config"]["params"][1]["index"]=0;
+  for (auto& child:indexed["config"]["submodels"])
+    child["config"]["params"]=indexed["config"]["params"];
+  { std::ofstream file(path); file << indexed; }
+  for (auto size:{ModelSize::Full,ModelSize::Lite}) {
+    NamModelEngine mapped, reference;
+    std::string error;
+    Check(mapped.LoadModel(path.string(),error,size),error);
+    Check(reference.LoadModel((directory/"hyper_a2_low_rank.nam").string(),error,size),error);
+    const auto& specs=mapped.GetParameterInfos();
+    Check(specs.size()==3 && specs[0].displayIndex==2 &&
+          specs[1].displayIndex==1 && specs[2].displayIndex==0,
+          "Plugin did not preserve neural runtime indices with ordered GUI");
+    Check(mapped.SetParameterValues(std::vector<float>{2,5.1f,0}),
+          "Mapped controls rejected");
+    Check(reference.SetParameterValues(std::vector<float>{2,0}),
+          "Reference controls rejected");
+    auto expected=Render(reference,input);
+    for (auto& sample:expected) sample*=.5f;
+    Compare(Render(mapped,input),expected);
+  }
+  auto duplicate=indexed;
+  duplicate["config"]["params"][0]["index"]=0;
+  { std::ofstream file(path); file << duplicate; }
+  NamModelEngine invalidEngine;
+  std::string invalidMessage;
+  Check(!invalidEngine.LoadModel(path.string(),invalidMessage),
+        "Duplicated visual index was accepted");
   // Also confirm that the new container works without a volume extension.
   { std::ofstream file(path); file << extended; }
   std::filesystem::remove(path);
