@@ -16,9 +16,12 @@ on:
         type: string
         default: ""
   push:
-    branches: [codex/hyper-a2-support]
+    branches: [main, codex/hyper-a2-support]
     paths:
       - '.github/workflows/branch-build.yml'
+      - 'CMakeLists.txt'
+      - 'Source/**'
+      - 'Tests/**'
 permissions:
   contents: read
 jobs:
@@ -52,8 +55,8 @@ jobs:
         run: cmake --preset ${{ matrix.preset }} -DNAM_PARAMETRIC_BUILD_TESTS=ON
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} --parallel 3
-      - name: Verify export, calibration and smooth controls
-        run: ctest --test-dir build/${{ matrix.preset }} -C Release --output-on-failure -R "^static_export$"
+      - name: Verify export, model compatibility and unity IR gain
+        run: ctest --test-dir build/${{ matrix.preset }} -C Release --output-on-failure -R "^(static_export|hyper_a2_engine|ir_normalization)$"
       - name: Upload export validation files
         if: always()
         continue-on-error: true
