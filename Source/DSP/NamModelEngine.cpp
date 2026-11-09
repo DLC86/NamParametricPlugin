@@ -231,6 +231,7 @@ void AssignDisplayIndices(std::vector<ModelParameterInfo>& loadedParams,
                           const nlohmann::json& original, const pnam::OutputGainCurve& volume) {
   // The neural parameter array is positional: only the GUI may use the optional indices.
   for (size_t i = 0; i < loadedParams.size(); ++i) loadedParams[i].displayIndex = i;
+  if (loadedParams.empty()) return;  // Legacy and baked static NAM files have no params.
   const auto base = pnam::OutputGainCurve::NeuralSource(original);
   const auto& stored = base.at("config").at("params");
   if (stored.size() + (volume.enabled ? 1u : 0u) != loadedParams.size())
