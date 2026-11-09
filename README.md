@@ -7,6 +7,14 @@ and `ParametricOutputGain` files), plus optional
 curve is evaluated after the neural model, with click-free smoothing;
 Full/Lite, calibration, and static export remain supported.
 
+The plugin also recognizes optional `config.params[].index` metadata
+exported from the ParaNAM Trainer Plan page. It arranges neural knobs,
+switches and Linear Volume by one shared zero-based display order while
+keeping the original neural parameter indices for audio processing, session
+recall and static NAM export. Models without these new indices retain
+their previous layout. This change is on the development branch; existing
+v0.5.0 release binaries predate it.
+
 The IR loader now compensates for AudioDSPTools' built-in −18 dB gain and
 normalizes IR response using the same **64 log-spaced 100–5000 Hz band-power**
 target as ParaNAM Trainer's **Compare** page. This targets a **0 dB mean
