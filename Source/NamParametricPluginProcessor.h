@@ -34,6 +34,7 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
     double minValue = 0.0;
     double maxValue = 0.0;
     std::vector<juce::String> enumNames;
+    size_t displayIndex = 0;
 
     [[nodiscard]] bool IsSwitch() const { return !enumNames.empty(); }
   };
