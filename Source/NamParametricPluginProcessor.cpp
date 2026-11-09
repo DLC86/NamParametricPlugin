@@ -45,6 +45,7 @@ std::vector<NamParametricPluginAudioProcessor::RuntimeParameterInfo> ConvertRunt
     info.defaultValue = param.defaultValue;
     info.minValue = param.minValue;
     info.maxValue = param.maxValue;
+    info.displayIndex = param.displayIndex;
     info.enumNames.reserve(param.enumNames.size());
     for (const auto& enumName : param.enumNames) {
       info.enumNames.emplace_back(enumName);
