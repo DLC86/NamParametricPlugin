@@ -30,7 +30,7 @@ bool NamParametricPluginAudioProcessorEditor::RuntimeParameterListsEqual(
     const auto& a = lhs[i];
     const auto& b = rhs[i];
 
-    if (a.name != b.name || a.enumNames != b.enumNames ||
+    if (a.name != b.name || a.enumNames != b.enumNames || a.displayIndex != b.displayIndex ||
         !juce::approximatelyEqual(a.defaultValue, b.defaultValue) ||
         !juce::approximatelyEqual(a.minValue, b.minValue) ||
         !juce::approximatelyEqual(a.maxValue, b.maxValue)) {
