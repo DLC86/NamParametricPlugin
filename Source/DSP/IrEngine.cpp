@@ -72,17 +72,22 @@ bool IrEngine::LoadIr(const std::string& irPath, const double sampleRate,
                       std::string& errorMessage) {
   errorMessage.clear();
 
-  auto ir = std::make_unique<::dsp::ImpulseResponse>(irPath.c_str(), sampleRate);
-  if (ir->GetWavState() != ::dsp::wav::LoadReturnCode::SUCCESS) {
-    errorMessage = ::dsp::wav::GetMsgForLoadReturnCode(ir->GetWavState());
+  try {
+    auto ir = std::make_unique<::dsp::ImpulseResponse>(irPath.c_str(), sampleRate);
+    if (ir->GetWavState() != ::dsp::wav::LoadReturnCode::SUCCESS) {
+      errorMessage = ::dsp::wav::GetMsgForLoadReturnCode(ir->GetWavState());
+      return false;
+    }
+
+    const double gain = MatchCompareIrGain(ir->GetData(), sampleRate);
+    mIr = std::move(ir);
+    mNormalizationGain = gain;
+    mSampleRate = sampleRate;
+    return true;
+  } catch (const std::exception& error) {
+    errorMessage = error.what();
     return false;
   }
-
-  const double gain = MatchCompareIrGain(ir->GetData(), sampleRate);
-  mIr = std::move(ir);
-  mNormalizationGain = gain;
-  mSampleRate = sampleRate;
-  return true;
 }
 
 void IrEngine::Reset(const double sampleRate, const int maxBlockSize) {
