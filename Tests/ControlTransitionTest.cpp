@@ -462,6 +462,11 @@ void TestLiveCalibration(const std::filesystem::path& path) {
         "Input calibration sign or live response is incorrect");
   Check(processor.mValueTree.getRawParameterValue("controlTransition")->load() == 0.0f,
         "New processors must start in Eco");
+  Check(processor.mValueTree.getRawParameterValue("ecoTimingPreset")->load() == 0.0f &&
+            processor.mValueTree.getRawParameterValue("ecoInterpolationCurve")->load() == 0.0f,
+        "Eco tweak choices must default to original 20/40 cubic mode");
+  Set(processor, "ecoTimingPreset", 3);
+  Set(processor, "ecoInterpolationCurve", 1);
   Set(processor, "controlTransition", 1);
   juce::MemoryBlock state;
   processor.getStateInformation(state);
@@ -469,18 +474,57 @@ void TestLiveCalibration(const std::filesystem::path& path) {
   restored.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
   Check(restored.mValueTree.getRawParameterValue("controlTransition")->load() == 1.0f,
         "Crossfade selection was not recalled");
+  Check(restored.mValueTree.getRawParameterValue("ecoTimingPreset")->load() == 3.0f &&
+            restored.mValueTree.getRawParameterValue("ecoInterpolationCurve")->load() == 1.0f,
+        "Eco tweak selections were not recalled");
   auto xml =
       juce::AudioProcessor::getXmlFromBinary(state.getData(), static_cast<int>(state.getSize()));
   auto legacy = juce::ValueTree::fromXml(*xml);
   legacy.removeChild(legacy.getChildWithProperty("id", "controlTransition"), nullptr);
+  legacy.removeChild(legacy.getChildWithProperty("id", "ecoTimingPreset"), nullptr);
+  legacy.removeChild(legacy.getChildWithProperty("id", "ecoInterpolationCurve"), nullptr);
   juce::MemoryBlock oldState;
   auto oldXml = legacy.createXml();
   juce::AudioProcessor::copyXmlToBinary(*oldXml, oldState);
   restored.setStateInformation(oldState.getData(), static_cast<int>(oldState.getSize()));
   Check(restored.mValueTree.getRawParameterValue("controlTransition")->load() == 0.0f,
         "Sessions without a saved smoothing mode must migrate to Eco");
+  Check(restored.mValueTree.getRawParameterValue("ecoTimingPreset")->load() == 0.0f &&
+            restored.mValueTree.getRawParameterValue("ecoInterpolationCurve")->load() == 0.0f,
+        "Legacy sessions must default to the original Eco timing and curve");
 }
 }  // namespace
+
+// Exercise all experimental timing/curve combinations using the actual core
+// model output. A valid choice always settles to the exact conditioned network.
+void TestEcoTweakChoices(const std::filesystem::path& path) {
+  using namparametric::dsp::ControlTransition;
+  NamModelEngine reference;
+  std::string error;
+  Check(reference.LoadModel(path.string(), error), error.c_str());
+  Check(reference.SetParameterValues(std::vector<float>{9.0f, 1.0f, 2.0f}),
+        "Eco tweak reference destination rejected");
+  reference.SetControlTransition(ControlTransition::Eco);
+  reference.Reset(48000, 257);
+  const float destination = Render(reference, 32000, 257).back();
+  for (int timing = 0; timing < 5; ++timing) {
+    for (int curve = 0; curve < 4; ++curve) {
+      NamModelEngine model;
+      model.SetControlTransition(ControlTransition::Eco);
+      model.SetEcoTweakSettings(timing, curve);
+      Check(model.LoadModel(path.string(), error), error.c_str());
+      model.Reset(48000, 257);
+      Render(model, 16000, 257);
+      Check(model.SetParameterValues(std::vector<float>{9.0f, 1.0f, 2.0f}),
+            "Eco tweak choice rejected model controls");
+      const auto audio = Render(model, 16000, 257);
+      Check(std::all_of(audio.begin(), audio.end(), [](float x) { return std::isfinite(x); }),
+            "Eco tweak generated non-finite audio");
+      Check(std::abs(audio.back() - destination) < 1e-5f,
+            "Eco tweak did not converge to destination weights");
+    }
+  }
+}
 
 void TestControlTransitions(const std::filesystem::path& directory, const Json& hyper,
                             const Json& a2) {
@@ -519,6 +563,7 @@ void TestControlTransitions(const std::filesystem::path& directory, const Json& 
             "PNAM load changed the audio response");
     }
   }
+  TestEcoTweakChoices(directory / "transition_hyper.nam");
   TestEcoUnaffectedSignal(directory, hyper);
   TestSilentControlSweeps(directory / "transition_hyper.nam", hyper);
   TestWeightInterpolationGranularity(hyper);
