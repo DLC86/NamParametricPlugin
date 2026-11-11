@@ -261,7 +261,7 @@ void TestSilentControlSweeps(const std::filesystem::path& path, const Json& hype
   std::cout << "Zero-input knob sweeps: weight-smoothed Eco max d/dt=" << ecoPeak
             << " raw=" << rawPeak << " Crossfade=" << crossfadePeak
             << " high-frequency step RMS ratio="
-            << std::sqrt(ecoPower / std::max(1e-30, rawPower)) << '\\n';
+            << std::sqrt(ecoPower / std::max(1e-30, rawPower)) << '\n';
   // The synthetic fixture has a nonzero control-dependent DC bias. Smoothing
   // should attenuate its impulsive derivative without an output noise gate.
   Check(rawPeak > 1e-8, "Silent-sweep fixture does not respond at zero input");
