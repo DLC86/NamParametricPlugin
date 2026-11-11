@@ -337,6 +337,45 @@ void TestEcoNonzeroSignalSettling(const std::filesystem::path& path, ModelSize s
             << ": " << maximumError << '\n';
 }
 
+// Compare the transient peak and copy cost of the 0.5, 1, 2 and 4 ms
+// coefficient-update grids on the very same network. This is diagnostic:
+// timings depend on the CI runner, and a realistic embedded model may differ.
+void TestWeightInterpolationGranularity(const Json& hyper) {
+  for (const int stepFrames : {24, 48, 96, 192}) {
+    auto model = nam::get_dsp(hyper);
+    auto* net = dynamic_cast<nam::wavenet::HyperWaveNet*>(model.get());
+    Check(net != nullptr, "Interpolation granularity requires HyperWaveNet");
+    model->Reset(48000, 257);
+    float input[257]{}, output[257]{};
+    auto* in = input;
+    auto* out = output;
+    for (int i = 0; i < 63; ++i)
+      model->process(&in, &out, 257);
+    float previous = output[256];
+    net->ConfigureWeightSmoothing(1920, stepFrames);
+    dynamic_cast<nam::IParametricControl&>(*model).SetParams(
+        std::vector<float>{9.0f, 1.0f, 2.0f});
+    double maximumDerivative = 0.0, derivativePower = 0.0;
+    const auto start = std::chrono::steady_clock::now();
+    for (int chunk = 0; chunk < 20; ++chunk) {
+      model->process(&in, &out, 257);
+      for (float value : output) {
+        const double delta = static_cast<double>(value) - previous;
+        maximumDerivative = std::max(maximumDerivative, std::abs(delta));
+        derivativePower += delta * delta;
+        previous = value;
+      }
+    }
+    const auto ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count();
+    std::cout << "One-network weight step " << stepFrames << " frames ("
+              << stepFrames / 48.0 << " ms): zero-input max d/dt="
+              << maximumDerivative << " derivative RMS="
+              << std::sqrt(derivativePower / (20 * 257.0))
+              << " processing=" << ms << " ms\n";
+  }
+}
+
 void TestEcoUnaffectedSignal(const std::filesystem::path& directory, Json hyper) {
   // Zero the hypernetwork, leaving the audio base intact. Knob movement now
   // changes no weights: the de-click must not invent a transient on ordinary audio.
@@ -482,6 +521,7 @@ void TestControlTransitions(const std::filesystem::path& directory, const Json& 
   }
   TestEcoUnaffectedSignal(directory, hyper);
   TestSilentControlSweeps(directory / "transition_hyper.nam", hyper);
+  TestWeightInterpolationGranularity(hyper);
   TestEcoNonzeroSignalSettling(directory / "transition_hyper.nam", ModelSize::Full);
   // Both selectable A2 branches must satisfy the exact-zero-input transient
   // criterion with their own real neural weights (never a second DSP in Eco).
