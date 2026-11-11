@@ -9,6 +9,11 @@ from pathlib import Path
 import sys
 
 core = Path(sys.argv[1] if len(sys.argv) > 1 else "external/nam_core_parametric") / "NAM"
+if (core / "kernel_weight_smoothing.h").exists():
+    if "ScopedBlockAlphas scope" in (core / "wavenet/hyperwavenet.cpp").read_text():
+        print("Direct-kernel interpolation already installed")
+        sys.exit(0)
+    raise RuntimeError("Partially applied kernel interpolation; reset pinned submodule")
 def replace(path, before, after):
     file = core / path
     data = file.read_text()

@@ -409,13 +409,13 @@ void NamModelEngine::Reset(double sampleRate, int maxBlockSize) {
   mPeakDecay = static_cast<float>(std::exp(-1.0 / (rate * 0.050)));
   // A single active HyperWaveNet now eases conditioned *weights*, not the
   // audio output. Reconditioning remains throttled at 20 ms independently.
-  // Interpolation is split into 0.5 ms chunks for a 40 ms transition.
+  // The 40 ms ramp now interpolates coefficients per sample inside the kernels.
   if (auto* model = dynamic_cast<nam::wavenet::HyperWaveNet*>(mModel.get()))
     model->ConfigureWeightSmoothing(
         mActiveTransition == ControlTransition::Eco
             ? std::max(1, static_cast<int>(std::lround(rate * 0.040)))
             : 0,
-        std::max(1, static_cast<int>(std::lround(rate * 0.0005))));
+        0); // direct per-sample interpolation INSIDE convolution kernels
   if (auto* model = dynamic_cast<nam::wavenet::HyperWaveNet*>(mTransitionModel.get()))
     model->ConfigureWeightSmoothing(0, 1);
   if (mTransitionControl != nullptr) {
@@ -489,8 +489,7 @@ void NamModelEngine::ProcessModelInternal(float* input, float* output, int numSa
         model->ConfigureWeightSmoothing(
             std::max(1, static_cast<int>(std::lround(
                 GetModelSampleRateForProcessing() * 0.040))),
-            std::max(1, static_cast<int>(std::lround(
-                GetModelSampleRateForProcessing() * 0.0005))));
+            0); // direct per-sample kernel coefficients
       mLastRaw = mLastOutput;
       mPreviousRaw = mPreviousOutput;
       mRawHistory = mOutputHistory;

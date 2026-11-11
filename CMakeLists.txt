@@ -49,6 +49,10 @@ endif()
 # instance; re-running CMake is safe and mismatched upstream revisions fail.
 set(PNAM_WEIGHT_SMOOTHING_PATCH
   "${CMAKE_CURRENT_LIST_DIR}/patches/core-hyperwavenet-single-weight-smoothing.patch")
+# Experimental branch: an already installed direct kernel override also
+# contains the original weight-smoothing patch, so don't try to reverse
+# a now-modified original hunk on the second CMake configuration.
+if(NOT EXISTS "${NAM_CORE_NAM_DIR}/kernel_weight_smoothing.h")
 execute_process(
   COMMAND git -C "${NAM_CORE_DIR}" apply --reverse --check "${PNAM_WEIGHT_SMOOTHING_PATCH}"
   RESULT_VARIABLE PNAM_PATCH_ALREADY_APPLIED
@@ -69,6 +73,24 @@ if(NOT PNAM_PATCH_ALREADY_APPLIED EQUAL 0)
     message(FATAL_ERROR "Failed to apply pinned HyperWaveNet weight-smoothing patch")
   endif()
 endif()
+endif() # first-stage pinned core weight-smoothing patch
+
+# Experiment only: install the second-stage kernel interpolation on top of
+# the pinned core. This is idempotent across repeated CMake configurations.
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+execute_process(
+  COMMAND "${Python3_EXECUTABLE}"
+          "${CMAKE_CURRENT_LIST_DIR}/patches/apply-direct-kernel-smoothing.py"
+          "${NAM_CORE_DIR}"
+  RESULT_VARIABLE PNAM_DIRECT_KERNEL_RESULT
+  OUTPUT_VARIABLE PNAM_DIRECT_KERNEL_OUTPUT
+  ERROR_VARIABLE PNAM_DIRECT_KERNEL_ERROR)
+if(NOT PNAM_DIRECT_KERNEL_RESULT EQUAL 0)
+  message(FATAL_ERROR
+    "Experimental direct-kernel smoothing could not be installed: "
+    "${PNAM_DIRECT_KERNEL_ERROR}")
+endif()
+message(STATUS "${PNAM_DIRECT_KERNEL_OUTPUT}")
 
 file(GLOB NAM_CORE_SOURCES CONFIGURE_DEPENDS
   ${NAM_CORE_NAM_DIR}/*.cpp
