@@ -163,6 +163,47 @@ void TestEco(const std::filesystem::path& path, ModelSize size, double rate, int
         "Eco rapid moves/mode change lost the final control vector");
 }
 
+// Real audio-block regression: a second knob/switch vector is accepted immediately
+// but MUST NOT recondition weights until 20 ms of model audio has been rendered.
+// Both engines render identical input/history; one receives the pending request,
+// the other retains the currently applied controls.
+void TestEcoRateLimit(const std::filesystem::path& path, ModelSize size, int block) {
+  using namparametric::dsp::ControlTransition;
+  NamModelEngine limited, reference, settled;
+  std::string error;
+  for (auto* engine : {&limited, &reference, &settled}) {
+    engine->SetControlTransition(ControlTransition::Eco);
+    Check(engine->LoadModel(path.string(), error, size), error.c_str());
+    engine->Reset(48000, block);
+  }
+  Render(limited, 16000, block);
+  Render(reference, 16000, block);
+  const std::vector<float> first{9.0f, 1.0f, 2.0f};
+  const std::vector<float> last{2.0f, 0.0f, 1.0f};
+  Check(limited.SetParameterValues(first) && reference.SetParameterValues(first),
+        "Eco's initial control change was rejected");
+  Render(limited, 37, block);
+  Render(reference, 37, block);
+  Check(limited.SetParameterValues(last), "Eco pending target was rejected");
+  Check(limited.GetParameterValues() == last,
+        "Eco should expose the latest requested value even during cooldown");
+  // 37 + 864 = 901 model samples, still shorter than 20 ms (960 samples).
+  // Render at several host block sizes to catch block-time vs wall-clock bugs.
+  const auto throttled = Render(limited, 864, block);
+  const auto unchanged = Render(reference, 864, block);
+  for (size_t i = 0; i < throttled.size(); ++i)
+    Check(std::abs(throttled[i] - unchanged[i]) < 1e-7f,
+          "Eco recalculated weights before its 20 ms cooldown elapsed");
+  // Only the last requested target is applied once the model-sample clock
+  // permits it; after the 5 ms correction tail, audio must match a fresh model.
+  const float output = Render(limited, 24000, block).back();
+  Check(settled.SetParameterValues(last), "Final Eco destination rejected");
+  settled.Reset(48000, block);
+  const float expected = Render(settled, 24000, block).back();
+  Check(std::abs(output - expected) < 1e-6f,
+        "Eco 20 ms rate limiting did not settle on the last destination");
+}
+
 void TestEcoUnaffectedSignal(const std::filesystem::path& directory, Json hyper) {
   // Zero the hypernetwork, leaving the audio base intact. Knob movement now
   // changes no weights: the de-click must not invent a transient on ordinary audio.
@@ -283,6 +324,7 @@ void TestControlTransitions(const std::filesystem::path& directory, const Json& 
       TestTransition(path, size, 44100, 257);
       TestTransition(path, size, 96000, 257);
       for (const int block : {37, 257, 2048}) TestEco(path, size, 48000, block);
+      for (const int block : {37, 257, 2048}) TestEcoRateLimit(path, size, block);
       TestEco(path, size, 44100, 257);
       TestEco(path, size, 96000, 257);
     }
