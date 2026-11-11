@@ -79,6 +79,10 @@ class NamModelEngine {
   ControlTransition mRequestedTransition = ControlTransition::Crossfade;
   ControlTransition mActiveTransition = ControlTransition::Crossfade;
   int mStandbyWarmup = 0;
+  // Eco-only, model-sample clock: at most one hypernetwork reconditioning
+  // per 20 ms; requested controls are retained until the next eligible block.
+  // Crossfade and the independent Linear Volume gain stage do not use this.
+  int mEcoIntervalSamples = 1, mEcoCooldownRemaining = 0;
   int mCorrectionLength = 0, mCorrectionPosition = 0;
   int mRawHistory = 0, mPredictionSkip = 0;
   float mCorrectionStart = 0.0f, mLastRaw = 0.0f, mPreviousRaw = 0.0f;
