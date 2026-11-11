@@ -465,7 +465,7 @@ void TestLiveCalibration(const std::filesystem::path& path) {
   Check(processor.mValueTree.getRawParameterValue("ecoTimingPreset")->load() == 0.0f &&
             processor.mValueTree.getRawParameterValue("ecoInterpolationCurve")->load() == 0.0f,
         "Eco tweak choices must default to original 20/40 cubic mode");
-  Set(processor, "ecoTimingPreset", 3);
+  Set(processor, "ecoTimingPreset", 7);
   Set(processor, "ecoInterpolationCurve", 1);
   Set(processor, "controlTransition", 1);
   juce::MemoryBlock state;
@@ -474,7 +474,7 @@ void TestLiveCalibration(const std::filesystem::path& path) {
   restored.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
   Check(restored.mValueTree.getRawParameterValue("controlTransition")->load() == 1.0f,
         "Crossfade selection was not recalled");
-  Check(restored.mValueTree.getRawParameterValue("ecoTimingPreset")->load() == 3.0f &&
+  Check(restored.mValueTree.getRawParameterValue("ecoTimingPreset")->load() == 7.0f &&
             restored.mValueTree.getRawParameterValue("ecoInterpolationCurve")->load() == 1.0f,
         "Eco tweak selections were not recalled");
   auto xml =
@@ -507,7 +507,7 @@ void TestEcoTweakChoices(const std::filesystem::path& path) {
   reference.SetControlTransition(ControlTransition::Eco);
   reference.Reset(48000, 257);
   const float destination = Render(reference, 32000, 257).back();
-  for (int timing = 0; timing < 5; ++timing) {
+  for (int timing = 0; timing < 8; ++timing) {
     for (int curve = 0; curve < 4; ++curve) {
       NamModelEngine model;
       model.SetControlTransition(ControlTransition::Eco);

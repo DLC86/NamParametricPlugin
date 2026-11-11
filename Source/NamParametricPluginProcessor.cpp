@@ -314,7 +314,8 @@ NamParametricPluginAudioProcessor::CreateParameterLayout() {
   params.push_back(std::make_unique<juce::AudioParameterChoice>(
       juce::ParameterID(ParamIDs::ecoTimingPreset, 1), "Eco update / ramp (test)",
       juce::StringArray{"20 / 40 ms (default)", "20 / 60 ms", "20 / 20 ms",
-                        "30 / 30 ms", "40 / 40 ms"}, 0));
+                        "30 / 30 ms", "40 / 40 ms", "50 / 50 ms",
+                        "75 / 75 ms", "100 / 100 ms"}, 0));
   params.push_back(std::make_unique<juce::AudioParameterChoice>(
       juce::ParameterID(ParamIDs::ecoInterpolationCurve, 1), "Eco weight curve (test)",
       juce::StringArray{"Smoothstep (cubic)", "Smootherstep (quintic)",

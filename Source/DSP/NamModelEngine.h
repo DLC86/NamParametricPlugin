@@ -16,7 +16,7 @@ enum class OutputMode { Raw, Normalized, Calibrated, Auto };
 enum class ControlTransition { Eco, Crossfade };
 
 // Experiment-only Eco controls; choice indices match the plugin's settings.
-enum class EcoTimingPreset { Ms20_40, Ms20_60, Ms20_20, Ms30_30, Ms40_40 };
+enum class EcoTimingPreset { Ms20_40, Ms20_60, Ms20_20, Ms30_30, Ms40_40, Ms50_50, Ms75_75, Ms100_100 };
 enum class EcoInterpolationCurve { Smoothstep, Smootherstep, Linear, Septic };
 
 struct ModelParameterInfo {
@@ -88,8 +88,8 @@ class NamModelEngine {
   ControlTransition mRequestedTransition = ControlTransition::Crossfade;
   ControlTransition mActiveTransition = ControlTransition::Crossfade;
   int mStandbyWarmup = 0;
-  // Eco-only, model-sample clock: at most one hypernetwork reconditioning
-  // per 20 ms; requested controls are retained until the next eligible block.
+  // Eco-only, model-sample clock: recondition no faster than the selected
+  // interval; requested controls are retained until the next eligible block.
   // Crossfade and the independent Linear Volume gain stage do not use this.
   int mEcoIntervalSamples = 1, mEcoCooldownRemaining = 0;
   int mEcoTimingPreset = 0, mEcoCurve = 0;

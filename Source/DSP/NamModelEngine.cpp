@@ -382,18 +382,18 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
 }
 
 void NamModelEngine::SetEcoTweakSettings(const int timingPreset, const int curve) noexcept {
-  mEcoTimingPreset = std::clamp(timingPreset, 0, 4);
+  mEcoTimingPreset = std::clamp(timingPreset, 0, 7);
   mEcoCurve = std::clamp(curve, 0, 3);
 }
 
 int NamModelEngine::EcoIntervalFrames() const noexcept {
-  constexpr double intervals[] = {0.020, 0.020, 0.020, 0.030, 0.040};
+  constexpr double intervals[] = {0.020, 0.020, 0.020, 0.030, 0.040, 0.050, 0.075, 0.100};
   return std::max(1, static_cast<int>(std::lround(
       GetModelSampleRateForProcessing() * intervals[mEcoTimingPreset])));
 }
 
 int NamModelEngine::EcoRampFrames() const noexcept {
-  constexpr double ramps[] = {0.040, 0.060, 0.020, 0.030, 0.040};
+  constexpr double ramps[] = {0.040, 0.060, 0.020, 0.030, 0.040, 0.050, 0.075, 0.100};
   return std::max(2, static_cast<int>(std::lround(
       GetModelSampleRateForProcessing() * ramps[mEcoTimingPreset])));
 }

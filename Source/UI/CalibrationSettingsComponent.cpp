@@ -31,7 +31,8 @@ CalibrationSettingsComponent::CalibrationSettingsComponent(
   mTimingLabel.setText("Eco timing (test)", juce::dontSendNotification);
   mCurveLabel.setText("Weight curve (test)", juce::dontSendNotification);
   mTiming.addItemList({"20 / 40 ms (default)", "20 / 60 ms", "20 / 20 ms",
-                       "30 / 30 ms", "40 / 40 ms"}, 1);
+                       "30 / 30 ms", "40 / 40 ms", "50 / 50 ms",
+                       "75 / 75 ms", "100 / 100 ms"}, 1);
   mCurve.addItemList({"Smoothstep (cubic)", "Smootherstep (quintic)",
                       "Linear", "Septic (C3)"}, 1);
   mEcoTweakHelp.setText(
