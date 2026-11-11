@@ -344,4 +344,16 @@ if(NAM_PARAMETRIC_BUILD_TESTS)
       COMMAND nam_model_smoke_test "${NAM_CONCAT_TEST_MODEL}" "${NAM_HYPER_TEST_MODEL}"
     )
   endif()
+  # Offline diagnostic only: never linked into the plugin. It drives ONE
+  # HyperWaveNet instance per run, including one-sample weight updates.
+  add_executable(offline_weight_smoothing_experiment
+    Tests/OfflineSampleWeightSmoothingExperiment.cpp
+    $<TARGET_OBJECTS:nam_core_runtime>
+  )
+  target_include_directories(offline_weight_smoothing_experiment SYSTEM PRIVATE
+    ${NAM_CORE_DIR} ${NAM_CORE_NAM_DIR}
+    ${NAM_CORE_EIGEN_DIR} ${NAM_CORE_NLOHMANN_DIR})
+  target_compile_definitions(offline_weight_smoothing_experiment PRIVATE
+    EIGEN_MPL2_ONLY=1 EIGEN_NO_DEBUG=1 NAM_SAMPLE_FLOAT=1 NAM_ENABLE_A2_FAST=1)
+
 endif()
