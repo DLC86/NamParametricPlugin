@@ -204,6 +204,71 @@ void TestEcoRateLimit(const std::filesystem::path& path, ModelSize size, int blo
         "Eco 20 ms rate limiting did not settle on the last destination");
 }
 
+// A real zero-input regression: DC output can change with controls even when
+// every input sample is exactly 0. Compare high-frequency steps with the
+// unmodified single-network hypernetwork (instantaneous weights), and also
+// report the continuously running two-network Crossfade result for context.
+void TestSilentControlSweeps(const std::filesystem::path& path, const Json& hyper) {
+  using namparametric::dsp::ControlTransition;
+  NamModelEngine eco, crossfade;
+  std::string error;
+  eco.SetControlTransition(ControlTransition::Eco);
+  crossfade.SetControlTransition(ControlTransition::Crossfade);
+  Check(eco.LoadModel(path.string(), error), error.c_str());
+  Check(crossfade.LoadModel(path.string(), error), error.c_str());
+  eco.Reset(48000, 257);
+  crossfade.Reset(48000, 257);
+  auto raw = nam::get_dsp(hyper);
+  raw->Reset(48000, 257);
+  auto rawSilent = [&](int frames) {
+    std::vector<float> input(static_cast<size_t>(frames), 0.0f), out(input.size());
+    for (int i = 0; i < frames; i += 257) {
+      auto* in = input.data() + i;
+      auto* dst = out.data() + i;
+      raw->process(&in, &dst, std::min(257, frames - i));
+    }
+    return out;
+  };
+  Render(eco, 16000, 257);
+  Render(crossfade, 16000, 257);
+  rawSilent(16000);
+  double ecoPeak = 0.0, rawPeak = 0.0, crossfadePeak = 0.0;
+  double ecoPower = 0.0, rawPower = 0.0;
+  float ecoPrevious = 0.0f, rawPrevious = 0.0f, crossfadePrevious = 0.0f;
+  for (const auto values : {std::vector<float>{9, 1, 2}, {1, 0, 0},
+                            {10, 0, 2}, {2, 1, 1}}) {
+    Check(eco.SetParameterValues(values) && crossfade.SetParameterValues(values),
+          "Silent-sweep controls rejected");
+    dynamic_cast<nam::IParametricControl&>(*raw).SetParams(values);
+    // One full move and one settle interval, both with exact digital silence.
+    const auto ecoOut = Render(eco, 4800, 257);
+    const auto rawOut = rawSilent(4800);
+    const auto fadeOut = Render(crossfade, 4800, 257);
+    for (size_t i = 0; i < ecoOut.size(); ++i) {
+      const double ecoDiff = static_cast<double>(ecoOut[i]) - ecoPrevious;
+      const double rawDiff = static_cast<double>(rawOut[i]) - rawPrevious;
+      const double fadeDiff = static_cast<double>(fadeOut[i]) - crossfadePrevious;
+      ecoPrevious = ecoOut[i];
+      rawPrevious = rawOut[i];
+      crossfadePrevious = fadeOut[i];
+      ecoPeak = std::max(ecoPeak, std::abs(ecoDiff));
+      rawPeak = std::max(rawPeak, std::abs(rawDiff));
+      crossfadePeak = std::max(crossfadePeak, std::abs(fadeDiff));
+      ecoPower += ecoDiff * ecoDiff;
+      rawPower += rawDiff * rawDiff;
+    }
+  }
+  std::cout << "Zero-input knob sweeps: weight-smoothed Eco max d/dt=" << ecoPeak
+            << " raw=" << rawPeak << " Crossfade=" << crossfadePeak
+            << " high-frequency step RMS ratio="
+            << std::sqrt(ecoPower / std::max(1e-30, rawPower)) << '\\n';
+  // The synthetic fixture has a nonzero control-dependent DC bias. Smoothing
+  // should attenuate its impulsive derivative without an output noise gate.
+  Check(rawPeak > 1e-8, "Silent-sweep fixture does not respond at zero input");
+  Check(ecoPeak < rawPeak * 0.70,
+        "Weight interpolation did not sufficiently reduce zero-input step peaks");
+}
+
 void TestEcoUnaffectedSignal(const std::filesystem::path& directory, Json hyper) {
   // Zero the hypernetwork, leaving the audio base intact. Knob movement now
   // changes no weights: the de-click must not invent a transient on ordinary audio.
@@ -348,6 +413,7 @@ void TestControlTransitions(const std::filesystem::path& directory, const Json& 
     }
   }
   TestEcoUnaffectedSignal(directory, hyper);
+  TestSilentControlSweeps(directory / "transition_hyper.nam", hyper);
   // Cost probe uses the same HyperWaveNet, audio and block size for raw core
   // and plugin smoothing. Report, rather than assert, machine-dependent timing.
   auto raw = nam::get_dsp(hyper);
