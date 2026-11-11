@@ -1,0 +1,114 @@
+name: Offline sample-by-sample weight smoothing study
+on:
+  push:
+    branches:
+      - experiment/offline-sample-weight-smoothing
+    paths:
+      - '.github/workflows/offline-sample-weight-smoothing.yml'
+      - 'Tests/OfflineSampleWeightSmoothingExperiment.cpp'
+      - 'CMakeLists.txt'
+      - 'patches/core-hyperwavenet-single-weight-smoothing.patch'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-study:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    env:
+      OUT_DIR: offline-results
+    steps:
+      - name: Checkout exact experiment branch, including pinned core
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install compiler and headless CMake requirements
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld ninja-build libasound2-dev libjack-jackd2-dev \
+            libfreetype6-dev libfontconfig1-dev libx11-dev libxcomposite-dev \
+            libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev \
+            libgl1-mesa-dev
+      - name: Configure core-only experiment
+        run: >
+          cmake -S . -B build/offline -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld
+          -DNAM_PARAMETRIC_BUILD_TESTS=ON
+      - name: Build offline-only target (do not build or alter plugin)
+        run: cmake --build build/offline --parallel 3 --target offline_weight_smoothing_experiment
+      - name: Run sequential single-network offline comparison
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT_DIR"
+          build/offline/offline_weight_smoothing_experiment Tests/fixtures "$OUT_DIR" | tee "$OUT_DIR/run.log"
+      - name: Summarize sample-by-sample vs 0.5 ms across Full and Lite
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import csv, math, os
+          output = Path(os.environ["OUT_DIR"])
+          data = list(csv.DictReader((output / "metrics.csv").open()))
+          report = [
+              "# One-network coefficient smoothing: offline comparison",
+              "",
+              "48 kHz. Same initial and final controls, identical digital-zero or",
+              "two-tone input, 40 ms weight transition, 100 ms recorded output.",
+              "Runs are sequential; no second audio network contributes to output.",
+              "The hypernetwork is evaluated once per destination; only the",
+              "interpolated coefficients are loaded at the tested cadence.",
+              "",
+              "| Model | Branch | Input | Peak derivative: 0.5 ms | Peak derivative: sample-wise |"
+              " 2–20 kHz derivative RMS: 0.5 ms | 2–20 kHz derivative RMS: sample-wise |"
+              " 0.5 ms residual RMS vs sample-wise | Render time 0.5 ms / sample-wise |",
+              "|---|---|---|---:|---:|---:|---:|---:|---:|",
+          ]
+          for model in ("low_rank", "full"):
+              for size in ("full", "lite"):
+                  for signal in ("silence", "tone"):
+                      runs = {int(x["step_frames"]):x for x in data
+                              if x["model"]==model and x["size"]==size and x["input"]==signal}
+                      assert {-1,0,24,1}.issubset(runs), (model,size,signal)
+                      half, sample = runs[24], runs[1]
+                      def fmt(d, key):
+                          return f'{float(d[key]):.3e}'
+                      report.append(
+                          f'| {model} | {size} | {signal} |'
+                          f' {fmt(half,"peak_dy")} | {fmt(sample,"peak_dy")} |'
+                          f' {fmt(half,"high_band_2k_20k_dy")} |'
+                          f' {fmt(sample,"high_band_2k_20k_dy")} |'
+                          f' {fmt(half,"rms_vs_samplewise")} |'
+                          f' {float(half["render_ms"]):.2f} /'
+                          f' {float(sample["render_ms"]):.2f} ms |'
+                      )
+                      if signal == "silence":
+                          peak_a=float(half["peak_dy"]); peak_b=float(sample["peak_dy"])
+                          if peak_a > 0 and peak_b > 0:
+                              print(f'{model} {size} SILENCE peak change:'
+                                    f' {20*math.log10(peak_b/peak_a):+.2f} dB'
+                                    f' for per-sample vs 0.5 ms')
+          report += [
+              "",
+              "Peak derivative measures the maximum adjacent-sample difference of",
+              "output change relative to the identical *unchanged* reference.",
+              "Spectral RMS integrates FFT bins over 2–20 kHz of that derivative.",
+              "This is an artifact proxy, not a perceptually weighted loudness measure.",
+              "Residual measures discrepancy from the per-sample candidate,",
+              "**not** proof that the per-sample candidate is inaudible.",
+              "Audio rendering time is measured offline on a CI runner;",
+              "it is neither a real-time safety guarantee nor embedded CPU profiling.",
+              "The fixture networks are synthetic, not user-trained guitar captures.",
+              "Raw waveform CSVs contain every output sample for independent analysis.",
+          ]
+          report_path=output / "report.md"
+          report_path.write_text("\n".join(report)+"\n")
+          print(report_path.read_text())
+          PY
+      - name: Save waveform and report artifacts (no release)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-weight-study
+          path: offline-results
+          if-no-files-found: warn
+          retention-days: 30
