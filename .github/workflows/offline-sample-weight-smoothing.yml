@@ -7,6 +7,7 @@ on:
       - '.github/workflows/offline-sample-weight-smoothing.yml'
       - 'Tests/OfflineSampleWeightSmoothingExperiment.cpp'
       - 'CMakeLists.txt'
+      - 'Tests/OfflineSampleCore/CMakeLists.txt'
       - 'patches/core-hyperwavenet-single-weight-smoothing.patch'
   workflow_dispatch:
 permissions:
@@ -22,26 +23,27 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Install compiler and headless CMake requirements
+      - name: Apply exact pinned weight interpolation patch to checkout only
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang lld ninja-build libasound2-dev libjack-jackd2-dev \
-            libfreetype6-dev libfontconfig1-dev libx11-dev libxcomposite-dev \
-            libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev \
-            libgl1-mesa-dev
-      - name: Configure core-only experiment
-        run: >
-          cmake -S . -B build/offline -G Ninja -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-          -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld
-          -DNAM_PARAMETRIC_BUILD_TESTS=ON
-      - name: Build offline-only target (do not build or alter plugin)
-        run: cmake --build build/offline --parallel 3 --target offline_weight_smoothing_experiment
+          set -euo pipefail
+          patch_path="$(realpath patches/core-hyperwavenet-single-weight-smoothing.patch)"
+          core="external/nam_core_parametric"
+          test -f "$core/Dependencies/eigen/Eigen/Core"
+          if git -C "$core" apply --reverse --check "$patch_path" >/dev/null 2>&1; then
+            echo "Pinned smoothing patch already present"
+          else
+            git -C "$core" apply --check "$patch_path"
+            git -C "$core" apply "$patch_path"
+          fi
+      - name: Configure minimal core-only experiment (no system packages)
+        run: cmake -S Tests/OfflineSampleCore -B build/offline-core -DCMAKE_BUILD_TYPE=Release
+      - name: Compile standalone NAM core and offline probe only
+        run: cmake --build build/offline-core --parallel 3
       - name: Run sequential single-network offline comparison
         run: |
           set -euo pipefail
           mkdir -p "$OUT_DIR"
-          build/offline/offline_weight_smoothing_experiment Tests/fixtures "$OUT_DIR" | tee "$OUT_DIR/run.log"
+          build/offline-core/offline_weight_smoothing_experiment Tests/fixtures "$OUT_DIR" | tee "$OUT_DIR/run.log"
       - name: Summarize sample-by-sample vs 0.5 ms across Full and Lite
         run: |
           python3 - <<'PY'
