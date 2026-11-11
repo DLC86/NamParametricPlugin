@@ -1,0 +1,44 @@
+name: Direct per-sample kernel smoothing study
+on:
+  push:
+    branches:
+      - experiment/direct-kernel-weight-smoothing
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  direct-kernel-offline:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout pinned NAM core
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install original 0.5 ms prototype then direct-kernel changes
+        run: |
+          set -euo pipefail
+          patch_path="$(realpath patches/core-hyperwavenet-single-weight-smoothing.patch)"
+          git -C external/nam_core_parametric apply "$patch_path"
+          python3 patches/apply-direct-kernel-smoothing.py external/nam_core_parametric
+          git -C external/nam_core_parametric diff --check
+          git -C external/nam_core_parametric diff -- NAM/ > direct-kernel-core.patch
+      - name: Configure core-only test with no JUCE
+        run: cmake -S Tests/OfflineSampleCore -B build/direct-core -DCMAKE_BUILD_TYPE=Release
+      - name: Compile patched NAM core
+        run: cmake --build build/direct-core --parallel 3
+      - name: Run real DSP comparisons (silence and tones)
+        run: |
+          mkdir -p direct-kernel-results
+          build/direct-core/offline_weight_smoothing_experiment Tests/fixtures direct-kernel-results | tee direct-kernel-results/console.log
+          grep KERNEL_vs_RELOAD direct-kernel-results/console.log
+      - name: Save numerical comparison and source patch
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-kernel-offline-study
+          path: |
+            direct-kernel-results
+            direct-kernel-core.patch
+          if-no-files-found: warn
+          retention-days: 30
