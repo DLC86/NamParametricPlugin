@@ -1,6 +1,6 @@
 # NamParametricPlugin
 
-**Version 0.5.2 (prototype, draft)** replaces Eco's output-side step predictor
+**Version 0.5.2 (development prototype, not released)** replaces Eco's output-side step predictor
 with **single-network weight interpolation** for HyperWaveNet / HyperA2.
 The hypernetwork generates target weights at most once every 20 ms, and
 the *same* WaveNet interpolates between active and target coefficients over
