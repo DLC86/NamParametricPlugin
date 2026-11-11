@@ -31,6 +31,18 @@ struct ScopedTargetCapture {
   ScopedTargetCapture() noexcept { capture_target = true; }
   ~ScopedTargetCapture() noexcept { capture_target = old; }
 };
+// Polynomial curves: no trigonometric functions in the audio callback.
+inline float EvaluateAlpha(const float t, const int curve) noexcept {
+  switch (curve) {
+    case 1: return t * t * t * (t * (t * 6.f - 15.f) + 10.f); // quintic C2
+    case 2: return t;                                        // linear control
+    case 3: {                                                // septic C3
+      const float t2 = t * t;
+      return t2 * t2 * (35.f + t * (-84.f + t * (70.f - 20.f * t)));
+    }
+    default: return t * t * (3.f - 2.f * t);                 // cubic C1
+  }
+}
 struct ScopedBlockAlphas {
   const float* old = block_alphas;
   explicit ScopedBlockAlphas(const float* a) noexcept { block_alphas = a; }
@@ -212,9 +224,9 @@ replace("wavenet/model.cpp", "        output[ch][s] = this->_head_scale * final_
         output[ch][s] = scale * final_head_outputs(ch, s);""")
 
 replace("wavenet/hyperwavenet.h", "  [[nodiscard]] bool HasActiveWeightSmoothing() const noexcept;\n\nprivate:",
-        "  [[nodiscard]] bool HasActiveWeightSmoothing() const noexcept;\n\nprotected:\n  void SetMaxBufferSize(int maxBufferSize) override;\n\nprivate:")
+        "  [[nodiscard]] bool HasActiveWeightSmoothing() const noexcept;\n  void ConfigureKernelSmoothing(int transition_frames, int curve) noexcept;\n\nprotected:\n  void SetMaxBufferSize(int maxBufferSize) override;\n\nprivate:")
 replace("wavenet/hyperwavenet.h", "  std::vector<float> _start_weights;\n  nam::Hypernetwork",
-        "  std::vector<float> _start_weights;\n  std::vector<float> _kernel_alphas;\n  nam::Hypernetwork")
+        "  std::vector<float> _start_weights;\n  std::vector<float> _kernel_alphas;\n  int _kernel_curve = 0;\n  nam::Hypernetwork")
 replace("wavenet/hyperwavenet.cpp", '#include "hyperwavenet.h"',
         '#include "hyperwavenet.h"\n#include "../kernel_weight_smoothing.h"')
 replace("wavenet/hyperwavenet.cpp", "  _smooth_step_frames = std::max(1, step_frames);",
@@ -224,6 +236,14 @@ replace("wavenet/hyperwavenet.cpp",
         """bool HyperWaveNet::HasActiveWeightSmoothing() const noexcept
 {
   return _smooth_frames > 0 && _has_applied_weights && _smooth_position < _smooth_frames;
+}
+
+void HyperWaveNet::ConfigureKernelSmoothing(const int transition_frames, const int curve) noexcept
+{
+  if (HasActiveWeightSmoothing()) return; // Preserve the current ramp.
+  _kernel_curve = std::clamp(curve, 0, 3);
+  ConfigureWeightSmoothing(transition_frames, 0);
+  _smooth_position = _smooth_frames; // Avoid a phantom ramp on duration increase.
 }
 
 void HyperWaveNet::SetMaxBufferSize(const int frames)
@@ -241,7 +261,7 @@ replace("wavenet/hyperwavenet.cpp",
     {
       const int last = std::max(0, _smooth_position - 1);
       const float x = static_cast<float>(last) / static_cast<float>(_smooth_frames);
-      const float a = x * x * (3.f - 2.f * x);
+      const float a = kernel_weight_smoothing::EvaluateAlpha(x, _kernel_curve);
       for (size_t i = 0; i < _smoothed_weights.size(); ++i)
         _smoothed_weights[i] = _start_weights[i] + a * (_conditioned[i] - _start_weights[i]);
     }
@@ -274,7 +294,7 @@ replace("wavenet/hyperwavenet.cpp",
     {
       const int pos = std::min(_smooth_frames, _smooth_position + i);
       const float x = static_cast<float>(pos) / static_cast<float>(_smooth_frames);
-      _kernel_alphas[static_cast<size_t>(i)] = x * x * (3.f - 2.f * x);
+      _kernel_alphas[static_cast<size_t>(i)] = kernel_weight_smoothing::EvaluateAlpha(x, _kernel_curve);
     }
     {
       kernel_weight_smoothing::ScopedBlockAlphas scope(_kernel_alphas.data());
