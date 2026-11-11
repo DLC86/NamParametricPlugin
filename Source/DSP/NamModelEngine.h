@@ -15,6 +15,10 @@ enum class ModelSize { Full, Lite };
 enum class OutputMode { Raw, Normalized, Calibrated, Auto };
 enum class ControlTransition { Eco, Crossfade };
 
+// Experiment-only Eco controls; choice indices match the plugin's settings.
+enum class EcoTimingPreset { Ms20_40, Ms20_60, Ms20_20, Ms30_30, Ms40_40 };
+enum class EcoInterpolationCurve { Smoothstep, Smootherstep, Linear, Septic };
+
 struct ModelParameterInfo {
   std::string name;
   float minValue = 0.0f;
@@ -54,6 +58,8 @@ class NamModelEngine {
   [[nodiscard]] const std::vector<float>& GetParameterValues() const;
   bool SetParameterValues(std::span<const float> values) noexcept;
   void SetControlTransition(ControlTransition mode) noexcept { mRequestedTransition = mode; }
+  // Call from the audio thread; pending choices take effect between ramps.
+  void SetEcoTweakSettings(int timingPreset, int curve) noexcept;
 
  private:
   struct ResamplerState;
@@ -62,6 +68,9 @@ class NamModelEngine {
   void ProcessModel(float* input, float* output, int numSamples);
   void ProcessModelInternal(float* input, float* output, int numSamples);
   void ProcessEco(float* input, float* output, int numSamples);
+  void ApplyPendingEcoTweakSettings() noexcept;
+  [[nodiscard]] int EcoRampFrames() const noexcept;
+  [[nodiscard]] int EcoIntervalFrames() const noexcept;
 
   pnam::OutputGainCurve mOutputGain;
   std::vector<float> mControlValues, mGainNeuralValues;
@@ -83,6 +92,8 @@ class NamModelEngine {
   // per 20 ms; requested controls are retained until the next eligible block.
   // Crossfade and the independent Linear Volume gain stage do not use this.
   int mEcoIntervalSamples = 1, mEcoCooldownRemaining = 0;
+  int mEcoTimingPreset = 0, mEcoCurve = 0;
+  int mAppliedEcoTimingPreset = -1, mAppliedEcoCurve = -1;
   int mCorrectionLength = 0, mCorrectionPosition = 0;
   int mRawHistory = 0, mPredictionSkip = 0;
   float mCorrectionStart = 0.0f, mLastRaw = 0.0f, mPreviousRaw = 0.0f;

@@ -381,6 +381,38 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
   }
 }
 
+void NamModelEngine::SetEcoTweakSettings(const int timingPreset, const int curve) noexcept {
+  mEcoTimingPreset = std::clamp(timingPreset, 0, 4);
+  mEcoCurve = std::clamp(curve, 0, 3);
+}
+
+int NamModelEngine::EcoIntervalFrames() const noexcept {
+  constexpr double intervals[] = {0.020, 0.020, 0.020, 0.030, 0.040};
+  return std::max(1, static_cast<int>(std::lround(
+      GetModelSampleRateForProcessing() * intervals[mEcoTimingPreset])));
+}
+
+int NamModelEngine::EcoRampFrames() const noexcept {
+  constexpr double ramps[] = {0.040, 0.060, 0.020, 0.030, 0.040};
+  return std::max(2, static_cast<int>(std::lround(
+      GetModelSampleRateForProcessing() * ramps[mEcoTimingPreset])));
+}
+
+void NamModelEngine::ApplyPendingEcoTweakSettings() noexcept {
+  if (mEcoTimingPreset == mAppliedEcoTimingPreset && mEcoCurve == mAppliedEcoCurve)
+    return;
+  auto* model = dynamic_cast<nam::wavenet::HyperWaveNet*>(mModel.get());
+  // Preserve continuity: finish the old curve before changing the ramp shape.
+  if (model != nullptr && model->HasActiveWeightSmoothing())
+    return;
+  if (model != nullptr)
+    model->ConfigureKernelSmoothing(EcoRampFrames(), mEcoCurve);
+  mEcoIntervalSamples = EcoIntervalFrames();
+  mEcoCooldownRemaining = std::min(mEcoCooldownRemaining, mEcoIntervalSamples);
+  mAppliedEcoTimingPreset = mEcoTimingPreset;
+  mAppliedEcoCurve = mEcoCurve;
+}
+
 void NamModelEngine::Reset(double sampleRate, int maxBlockSize) {
   if (!IsLoaded()) {
     return;
@@ -397,7 +429,7 @@ void NamModelEngine::Reset(double sampleRate, int maxBlockSize) {
   mActiveTransition = mRequestedTransition;
   mStandbyWarmup = 0;
   const double rate = GetModelSampleRateForProcessing();
-  mEcoIntervalSamples = std::max(1, static_cast<int>(std::lround(rate * 0.020)));
+  mEcoIntervalSamples = EcoIntervalFrames();
   mEcoCooldownRemaining = 0;  // First move is immediate, including after preset restore.
   mCorrectionLength = std::max(2, static_cast<int>(std::lround(rate * 0.005)));
   mCorrectionPosition = mCorrectionLength;
@@ -407,15 +439,16 @@ void NamModelEngine::Reset(double sampleRate, int maxBlockSize) {
   mCorrectionStart = mLastRaw = mPreviousRaw = mPredictionError = mRawPeak = 0.0f;
   mErrorDecay = static_cast<float>(std::exp(-1.0 / (rate * 0.010)));
   mPeakDecay = static_cast<float>(std::exp(-1.0 / (rate * 0.050)));
-  // A single active HyperWaveNet now eases conditioned *weights*, not the
-  // audio output. Reconditioning remains throttled at 20 ms independently.
-  // The 40 ms ramp now interpolates coefficients per sample inside the kernels.
-  if (auto* model = dynamic_cast<nam::wavenet::HyperWaveNet*>(mModel.get()))
-    model->ConfigureWeightSmoothing(
-        mActiveTransition == ControlTransition::Eco
-            ? std::max(1, static_cast<int>(std::lround(rate * 0.040)))
-            : 0,
-        0); // direct per-sample interpolation INSIDE convolution kernels
+  // The hypernetwork update interval and interpolation curve are auditionable
+  // independently. Only one DSP network renders in Eco.
+  if (auto* model = dynamic_cast<nam::wavenet::HyperWaveNet*>(mModel.get())) {
+    if (mActiveTransition == ControlTransition::Eco)
+      model->ConfigureKernelSmoothing(EcoRampFrames(), mEcoCurve);
+    else
+      model->ConfigureWeightSmoothing(0, 1);
+  }
+  mAppliedEcoTimingPreset = mActiveTransition == ControlTransition::Eco ? mEcoTimingPreset : -1;
+  mAppliedEcoCurve = mActiveTransition == ControlTransition::Eco ? mEcoCurve : -1;
   if (auto* model = dynamic_cast<nam::wavenet::HyperWaveNet*>(mTransitionModel.get()))
     model->ConfigureWeightSmoothing(0, 1);
   if (mTransitionControl != nullptr) {
@@ -486,10 +519,10 @@ void NamModelEngine::ProcessModelInternal(float* input, float* output, int numSa
       // Switching modes should not delay the first live Eco control change.
       mEcoCooldownRemaining = 0;
       if (auto* model = dynamic_cast<nam::wavenet::HyperWaveNet*>(mModel.get()))
-        model->ConfigureWeightSmoothing(
-            std::max(1, static_cast<int>(std::lround(
-                GetModelSampleRateForProcessing() * 0.040))),
-            0); // direct per-sample kernel coefficients
+        model->ConfigureKernelSmoothing(EcoRampFrames(), mEcoCurve);
+      mEcoIntervalSamples = EcoIntervalFrames();
+      mAppliedEcoTimingPreset = mEcoTimingPreset;
+      mAppliedEcoCurve = mEcoCurve;
       mLastRaw = mLastOutput;
       mPreviousRaw = mPreviousOutput;
       mRawHistory = mOutputHistory;
@@ -562,9 +595,10 @@ void NamModelEngine::ProcessModelInternal(float* input, float* output, int numSa
 }
 
 void NamModelEngine::ProcessEco(float* input, float* output, int numSamples) {
+  ApplyPendingEcoTweakSettings();
   // A knob may be automated every host block. Coalesce all intermediate
-  // destinations and recondition no faster than once per 20 ms of *model*
-  // audio, without a GUI timer, wall-clock calls, allocations or extra threads.
+  // destinations and recondition at the selected *model*-sample interval,
+  // without a GUI timer, wall-clock calls, allocations or extra threads.
   // Continue processing and running the existing 5 ms de-click while waiting.
   const bool changed = mRequestedTransition == ControlTransition::Eco &&
                        mEcoCooldownRemaining == 0 &&
