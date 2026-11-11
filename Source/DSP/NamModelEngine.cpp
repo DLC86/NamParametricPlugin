@@ -397,6 +397,8 @@ void NamModelEngine::Reset(double sampleRate, int maxBlockSize) {
   mActiveTransition = mRequestedTransition;
   mStandbyWarmup = 0;
   const double rate = GetModelSampleRateForProcessing();
+  mEcoIntervalSamples = std::max(1, static_cast<int>(std::lround(rate * 0.020)));
+  mEcoCooldownRemaining = 0;  // First move is immediate, including after preset restore.
   mCorrectionLength = std::max(2, static_cast<int>(std::lround(rate * 0.005)));
   mCorrectionPosition = mCorrectionLength;
   mRawHistory = mPredictionSkip = 0;
@@ -466,6 +468,8 @@ void NamModelEngine::ProcessModelInternal(float* input, float* output, int numSa
     mPredictionError = mRawPeak = 0.0f;
     mStandbyWarmup = 0;
     if (mActiveTransition == ControlTransition::Eco) {
+      // Switching modes should not delay the first live Eco control change.
+      mEcoCooldownRemaining = 0;
       mLastRaw = mLastOutput;
       mPreviousRaw = mPreviousOutput;
       mRawHistory = mOutputHistory;
@@ -536,13 +540,20 @@ void NamModelEngine::ProcessModelInternal(float* input, float* output, int numSa
 }
 
 void NamModelEngine::ProcessEco(float* input, float* output, int numSamples) {
-  const bool changed =
-      mRequestedTransition == ControlTransition::Eco && mParameterValues != mRenderedValues;
+  // A knob may be automated every host block. Coalesce all intermediate
+  // destinations and recondition no faster than once per 20 ms of *model*
+  // audio, without a GUI timer, wall-clock calls, allocations or extra threads.
+  // Continue processing and running the existing 5 ms de-click while waiting.
+  const bool changed = mRequestedTransition == ControlTransition::Eco &&
+                       mEcoCooldownRemaining == 0 &&
+                       mParameterValues != mRenderedValues;
   if (changed) {
     mParametricControl->SetParams(mParameterValues);
     std::copy(mParameterValues.begin(), mParameterValues.end(), mRenderedValues.begin());
+    mEcoCooldownRemaining = mEcoIntervalSamples;
   }
   mModel->process(&input, &output, numSamples);
+  mEcoCooldownRemaining = std::max(0, mEcoCooldownRemaining - numSamples);
   for (int i = 0; i < numSamples; ++i) {
     const float raw = output[i];
     const float prediction = 2.0f * mLastRaw - mPreviousRaw;
