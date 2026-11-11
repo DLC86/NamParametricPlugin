@@ -204,18 +204,36 @@ void TestEcoRateLimit(const std::filesystem::path& path, ModelSize size, int blo
         "Eco 20 ms rate limiting did not settle on the last destination");
 }
 
+// Extract exactly one HyperWaveNet from a HyperA2 container for the raw
+// un-smoothed reference: the plugin runs the same selected Full/Lite branch.
+Json RawA2Branch(const Json& a2, ModelSize size) {
+  const auto& branch = a2.at("config").at("submodels").at(
+      size == ModelSize::Lite ? 0 : 1);
+  const size_t offset = branch.at("weight_offset").get<size_t>();
+  const size_t count = branch.at("weight_count").get<size_t>();
+  Check(offset + count <= a2.at("weights").size(), "A2 reference branch out of range");
+  Json model = a2;
+  model["architecture"] = "HyperWaveNet";
+  model["config"] = branch.at("config");
+  model["weights"] = Json::array();
+  for (size_t i = offset; i < offset + count; ++i)
+    model["weights"].push_back(a2["weights"][i]);
+  return model;
+}
+
 // A real zero-input regression: DC output can change with controls even when
 // every input sample is exactly 0. Compare high-frequency steps with the
 // unmodified single-network hypernetwork (instantaneous weights), and also
 // report the continuously running two-network Crossfade result for context.
-void TestSilentControlSweeps(const std::filesystem::path& path, const Json& hyper) {
+void TestSilentControlSweeps(const std::filesystem::path& path, const Json& hyper,
+                             ModelSize size = ModelSize::Full) {
   using namparametric::dsp::ControlTransition;
   NamModelEngine eco, crossfade;
   std::string error;
   eco.SetControlTransition(ControlTransition::Eco);
   crossfade.SetControlTransition(ControlTransition::Crossfade);
-  Check(eco.LoadModel(path.string(), error), error.c_str());
-  Check(crossfade.LoadModel(path.string(), error), error.c_str());
+  Check(eco.LoadModel(path.string(), error, size), error.c_str());
+  Check(crossfade.LoadModel(path.string(), error, size), error.c_str());
   eco.Reset(48000, 257);
   crossfade.Reset(48000, 257);
   auto raw = nam::get_dsp(hyper);
@@ -419,6 +437,10 @@ void TestControlTransitions(const std::filesystem::path& directory, const Json& 
   }
   TestEcoUnaffectedSignal(directory, hyper);
   TestSilentControlSweeps(directory / "transition_hyper.nam", hyper);
+  // Both selectable A2 branches must satisfy the exact-zero-input transient
+  // criterion with their own real neural weights (never a second DSP in Eco).
+  for (auto size : {ModelSize::Full, ModelSize::Lite})
+    TestSilentControlSweeps(directory / "transition_a2.nam", RawA2Branch(a2, size), size);
   // Cost probe uses the same HyperWaveNet, audio and block size for raw core
   // and plugin smoothing. Report, rather than assert, machine-dependent timing.
   auto raw = nam::get_dsp(hyper);
