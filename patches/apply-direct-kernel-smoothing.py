@@ -191,10 +191,13 @@ replace("wavenet/model.cpp", "  this->_head_scale = *(it++); // TODO " + chr(96)
   if (kernel_weight_smoothing::capture_target)
     _ramp_head_scale_delta = scale - _head_scale;
   else { _head_scale = scale; _ramp_head_scale_delta = 0.f; }""")
-replace("wavenet/model.cpp", "        this->_scaled_head_scratch(ch, s) = this->_head_scale * final_head_outputs(ch, s);",
-        """        const float* alphas = kernel_weight_smoothing::block_alphas;
+replace("wavenet/model.cpp", "      for (int s = 0; s < num_frames; s++)\n        this->_scaled_head_scratch(ch, s) = this->_head_scale * final_head_outputs(ch, s);",
+        """      for (int s = 0; s < num_frames; s++)
+      {
+        const float* alphas = kernel_weight_smoothing::block_alphas;
         const float scale = _head_scale + (alphas ? alphas[s] * _ramp_head_scale_delta : 0.f);
-        this->_scaled_head_scratch(ch, s) = scale * final_head_outputs(ch, s);""")
+        this->_scaled_head_scratch(ch, s) = scale * final_head_outputs(ch, s);
+      }""")
 replace("wavenet/model.cpp", "      dst[s] = scale * src[s];",
         """      const float* alphas = kernel_weight_smoothing::block_alphas;
       dst[s] = (scale + (alphas ? alphas[s] * _ramp_head_scale_delta : 0.f)) * src[s];""")
