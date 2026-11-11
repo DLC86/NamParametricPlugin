@@ -100,13 +100,45 @@ Eco to Crossfade waits for an in-progress weight interpolation to finish
 before warming the inactive second instance. Linear Volume continues to
 smooth independently with no hypernetwork update.
 
-The exact 1/40 ms values are *prototype choices*, not a claim that every
+The exact 0.5/40 ms values are *prototype choices*, not a claim that every
 trained neural model will be artifact-free. One-network inference saves
 the continuous CPU cost of a dual-network transition but loading weights
 more often has its own cost. We test sample-exact zero-input sweeps,
 control retargeting, full/lite models and compare peak/rms derivative with
 instantaneous weights. Tests on real captured amplifier models remain
 important before declaring the solution production-ready.
+
+#### First synthetic CI measurements (Linux, 48 kHz)
+
+With every input sample exactly zero, four knob/switch movements on the
+deterministic HyperWaveNet fixture produce a maximum output first difference
+of **0.000301716** with instantaneous weights versus **0.00000565685**
+with single-network Eco (about **34.5 dB** reduction). The two-network
+Crossfade reference reaches **0.000000189058**. For the weight-smoothed
+Eco stream the RMS of output first differences is **12.2%** of the abrupt
+reference. Full and Lite HyperA2 zero-input tests also pass, and final
+two-tone audio after settling matches the directly configured model exactly
+in the test. These are synthetic signal tests, not listening tests on real
+captures.
+
+A further 40 ms weight-ramp experiment varied the coefficient-copy interval:
+
+| Weight update interval | Max derivative at zero input | Processing time for 5,140 samples |
+| --- | ---: | ---: |
+| 0.5 ms | 0.000002960 | 4.58 ms |
+| 1 ms | 0.000005915 | 4.05 ms |
+| 2 ms | 0.000011801 | 3.75 ms |
+| 4 ms | 0.000023366 | 3.60 ms |
+
+The tests retain **0.5 ms** because of its lower transient peaks; the
+small additional CPU cost is an explicit tradeoff. In the full processor
+benchmark on this CI machine, Eco costs approximately **1×** the raw DSP
+at stationary controls and **1.8×** with continuously moving controls.
+Crossfade costs approximately **2×** even with stationary controls.
+These timing ratios are runner/model specific; do **not** infer embedded
+real-time feasibility or a hard upper bound on individual callback spikes.
+The optional Crossfade comparison still keeps a standby DSP object in
+memory; only one network actually processes audio in Eco.
 
 ### 0.5.1 Eco reconditioning rate limit
 
