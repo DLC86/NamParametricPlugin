@@ -86,7 +86,7 @@ coalesces requests. HyperWaveNet evaluates its hypernetwork **once** to
 generate `targetWeights`. The already-running WaveNet keeps its DSP history,
 and the core linearly interpolates each coefficient from the currently
 applied weight vector to `targetWeights`, using a smoothstep time curve over
-40 ms and 1 ms internal processing increments. The full weight set is
+40 ms and 0.5 ms internal processing increments. The full weight set is
 loaded into the *same* DSP; there is no second inference and no repeated
 hypernetwork calculation at every step. If a new target arrives while
 smoothing, interpolation starts from the weights currently in use. When the
