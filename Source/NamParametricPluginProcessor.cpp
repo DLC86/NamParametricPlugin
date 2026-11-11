@@ -938,11 +938,16 @@ void NamParametricPluginAudioProcessor::setStateInformation(const void* data,
     return;
   }
 
-  if (!tree.getChildWithProperty("id", ParamIDs::controlTransition).isValid()) {
-    juce::ValueTree transition("PARAM");
-    transition.setProperty("id", ParamIDs::controlTransition, nullptr);
-    transition.setProperty("value", 0.0f, nullptr);
-    tree.appendChild(transition, nullptr);
+  // Existing sessions predate these experimental choices. Explicitly restore
+  // their defaults even when replacing state in an already-running processor.
+  for (const char* choiceId : {ParamIDs::controlTransition, ParamIDs::ecoTimingPreset,
+                                ParamIDs::ecoInterpolationCurve}) {
+    if (!tree.getChildWithProperty("id", choiceId).isValid()) {
+      juce::ValueTree parameter("PARAM");
+      parameter.setProperty("id", choiceId, nullptr);
+      parameter.setProperty("value", 0.0f, nullptr);
+      tree.appendChild(parameter, nullptr);
+    }
   }
   mValueTree.replaceState(tree);
   {
