@@ -73,6 +73,30 @@ compression/distortion; this is independent of the output gain correction.
 
 ## Smooth HyperWaveNet / HyperA2 controls
 
+### 0.5.1 Eco reconditioning rate limit
+
+Eco now limits hypernetwork weight recomputation to **one every 20 ms of
+model-rate audio**, using a sample counter rather than wall time or a GUI timer.
+The first change after Reset or switching into Eco is immediate; new values
+arriving during the cooldown replace the pending destination rather than
+forming a queue. Processing continues with the current weights until the
+next eligible audio block, at which point the latest complete continuous/switch
+control vector is committed. The existing 5 ms predictor correction remains
+active during and after changes. This policy limits the *frequency* of weight
+recomputation but not its single-call cost; it does not add audio latency.
+
+Linear Volume never enters this queue or triggers the hypernetwork: the
+independent output-gain stage keeps its original sample-by-sample 5 ms
+smoothing. Crossfade mode keeps its original two-network, 50 ms behavior.
+Initial model/preset restore and Reset settle on the exact requested weights,
+without any cooldown. The final destination is always applied after a
+sufficient amount of audio has been processed, independent of host timers or
+offline rendering speed. Updates are quantized to model DSP block boundaries,
+so the effective control response can exceed 20 ms by up to one block.
+CPU and perceptual improvement vary with control motion and model architecture;
+the tests assert bounded retargeting and exact final response, not a fixed
+speedup or universal absence of audible artifacts.
+
 ### 0.4.1 Eco de-click
 
 Settings > **Control smoothing** now defaults to **Eco de-click** for new instances
