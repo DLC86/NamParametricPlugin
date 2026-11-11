@@ -44,6 +44,32 @@ if(NOT EXISTS ${NAM_CORE_EIGEN_DIR}/Eigen/Core)
     "Run: git submodule update --init --recursive")
 endif()
 
+# The upstream core is pinned as a git submodule. Apply this narrowly scoped
+# opt-in HyperWaveNet weight-ramp patch in the build tree. It uses one DSP
+# instance; re-running CMake is safe and mismatched upstream revisions fail.
+set(PNAM_WEIGHT_SMOOTHING_PATCH
+  "${CMAKE_CURRENT_LIST_DIR}/patches/core-hyperwavenet-single-weight-smoothing.patch")
+execute_process(
+  COMMAND git -C "${NAM_CORE_DIR}" apply --reverse --check "${PNAM_WEIGHT_SMOOTHING_PATCH}"
+  RESULT_VARIABLE PNAM_PATCH_ALREADY_APPLIED
+  OUTPUT_QUIET ERROR_QUIET)
+if(NOT PNAM_PATCH_ALREADY_APPLIED EQUAL 0)
+  execute_process(
+    COMMAND git -C "${NAM_CORE_DIR}" apply --check "${PNAM_WEIGHT_SMOOTHING_PATCH}"
+    RESULT_VARIABLE PNAM_PATCH_CAN_APPLY
+    ERROR_VARIABLE PNAM_PATCH_ERROR)
+  if(NOT PNAM_PATCH_CAN_APPLY EQUAL 0)
+    message(FATAL_ERROR
+      "Pinned HyperWaveNet core smoothing patch cannot be applied: ${PNAM_PATCH_ERROR}")
+  endif()
+  execute_process(
+    COMMAND git -C "${NAM_CORE_DIR}" apply "${PNAM_WEIGHT_SMOOTHING_PATCH}"
+    RESULT_VARIABLE PNAM_PATCH_RESULT)
+  if(NOT PNAM_PATCH_RESULT EQUAL 0)
+    message(FATAL_ERROR "Failed to apply pinned HyperWaveNet weight-smoothing patch")
+  endif()
+endif()
+
 file(GLOB NAM_CORE_SOURCES CONFIGURE_DEPENDS
   ${NAM_CORE_NAM_DIR}/*.cpp
   ${NAM_CORE_NAM_DIR}/*/*.cpp
