@@ -36,8 +36,7 @@ diff --git a/NAM/wavenet/hyperwavenet.h b/NAM/wavenet/hyperwavenet.h
  private:
    std::vector<ParamSpec> _param_specs;
    std::vector<float> _params;
-@@ -51,7 +58,15 @@
-   std::vector<float> _params;
+@@ -52,6 +59,14 @@
    std::vector<float> _base_weights;
    std::vector<float> _conditioned;
 +  std::vector<float> _smoothed_weights;
