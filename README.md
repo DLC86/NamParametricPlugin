@@ -1,5 +1,17 @@
 # NamParametricPlugin
 
+**Version 0.5.1 (draft)** adds a model-sample-time rate limiter to the
+default **Eco de-click** mode: neural weights are reconditioned at most once
+every **20 ms**. Rapid knob and switch automation is coalesced to the latest
+complete value vector, with the first change applied immediately and the
+original 5 ms de-click tail preserved. Linear Volume still uses its separate
+sample-smoothed DSP stage (no hypernetwork reconditioning), while the
+two-network Crossfade mode is unchanged. This stabilizes the frequency of
+CPU spikes during rapid automation; it does not move the individual weight
+calculation off the audio thread. The rate limit introduces up to about
+20 ms of additional control response during sustained movement, quantized
+to model processing block boundaries, but no audio latency.
+
 **Version 0.5.0** adds support for new
 `ParametricSlimmableContainer` models (while still loading older `HyperA2`
 and `ParametricOutputGain` files), plus optional
@@ -12,8 +24,7 @@ exported from the ParaNAM Trainer Plan page. It arranges neural knobs,
 switches and Linear Volume by one shared zero-based display order while
 keeping the original neural parameter indices for audio processing, session
 recall and static NAM export. Models without these new indices retain
-their previous layout. This change is on the development branch; existing
-v0.5.0 release binaries predate it.
+their previous layout. The new 0.5.1 draft also includes this ordering support.
 
 The IR loader now compensates for AudioDSPTools' built-in −18 dB gain and
 normalizes IR response using the same **64 log-spaced 100–5000 Hz band-power**
