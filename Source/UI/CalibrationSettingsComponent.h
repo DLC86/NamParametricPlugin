@@ -10,12 +10,16 @@ class CalibrationSettingsComponent final : public juce::Component {
 
  private:
   juce::Label mTitle, mInputLabel, mOutputLabel, mHelp, mTransitionLabel, mTransitionHelp;
+  juce::Label mTimingLabel, mCurveLabel, mEcoTweakHelp;
   juce::ToggleButton mEnabled{"Calibrate input"};
   juce::Slider mInput{juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight};
   juce::ComboBox mOutput;
   juce::ComboBox mTransition;
+  juce::ComboBox mTiming, mCurve;
   std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> mEnabledAttachment;
   std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mInputAttachment;
   std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mOutputAttachment;
   std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mTransitionAttachment;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mTimingAttachment;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mCurveAttachment;
 };

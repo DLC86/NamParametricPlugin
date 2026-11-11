@@ -11,8 +11,8 @@ CalibrationSettingsComponent::CalibrationSettingsComponent(
   mOutputLabel.setText("Output mode", juce::dontSendNotification);
   mTransitionLabel.setText("Control smoothing", juce::dontSendNotification);
   mTransitionHelp.setText(
-      "Eco: experimental 5 ms de-click, one running network. Crossfade: 50 ms transitions, "
-      "two running networks and higher CPU. Switch positions stay discrete in both modes.",
+      "Eco: single-network per-sample kernel interpolation. Crossfade: two networks, 50 ms. "
+      "Discrete switches always use valid positions.",
       juce::dontSendNotification);
   mTransitionHelp.setFont(juce::Font(juce::FontOptions(12.0f)));
   mTransitionHelp.setColour(juce::Label::textColourId, nam::ui::Colours::textSecondary);
@@ -28,9 +28,23 @@ CalibrationSettingsComponent::CalibrationSettingsComponent(
   mInput.setTextBoxStyle(juce::Slider::TextBoxRight, false, 85, 24);
   mOutput.addItemList({"Raw", "Normalized", "Calibrated", "Auto"}, 1);
   mTransition.addItemList({"Eco de-click (1 network)", "Crossfade (2 networks)"}, 1);
+  mTimingLabel.setText("Eco timing (test)", juce::dontSendNotification);
+  mCurveLabel.setText("Weight curve (test)", juce::dontSendNotification);
+  mTiming.addItemList({"20 / 40 ms (default)", "20 / 60 ms", "20 / 20 ms",
+                       "30 / 30 ms", "40 / 40 ms"}, 1);
+  mCurve.addItemList({"Smoothstep (cubic)", "Smootherstep (quintic)",
+                      "Linear", "Septic (C3)"}, 1);
+  mEcoTweakHelp.setText(
+      "Temporary experiment settings; active only in Eco. The first number is the "
+      "hypernetwork update interval, the second is the coefficient ramp duration. "
+      "Changes take effect after the current ramp ends. Default: 20 / 40 ms + Smoothstep.",
+      juce::dontSendNotification);
+  mEcoTweakHelp.setFont(juce::Font(juce::FontOptions(12.0f)));
+  mEcoTweakHelp.setColour(juce::Label::textColourId, nam::ui::Colours::textSecondary);
   for (auto* child : std::initializer_list<juce::Component*>{
            &mTitle, &mInputLabel, &mOutputLabel, &mHelp, &mEnabled, &mInput, &mOutput,
-           &mTransitionLabel, &mTransition, &mTransitionHelp}) {
+           &mTransitionLabel, &mTransition, &mTransitionHelp,
+           &mTimingLabel, &mTiming, &mCurveLabel, &mCurve, &mEcoTweakHelp}) {
     addAndMakeVisible(child);
   }
   using IDs = NamParametricPluginAudioProcessor::ParamIDs;
@@ -42,7 +56,11 @@ CalibrationSettingsComponent::CalibrationSettingsComponent(
       state, IDs::outputMode, mOutput);
   mTransitionAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
       state, IDs::controlTransition, mTransition);
-  setSize(420, 345);
+  mTimingAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+      state, IDs::ecoTimingPreset, mTiming);
+  mCurveAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+      state, IDs::ecoInterpolationCurve, mCurve);
+  setSize(440, 440);
 }
 
 void CalibrationSettingsComponent::paint(juce::Graphics& g) {
@@ -65,5 +83,13 @@ void CalibrationSettingsComponent::resized() {
   mTransitionLabel.setBounds(transition.removeFromLeft(125));
   mTransition.setBounds(transition.reduced(0, 3));
   bounds.removeFromTop(6);
-  mTransitionHelp.setBounds(bounds);
+  mTransitionHelp.setBounds(bounds.removeFromTop(48));
+  auto timing = bounds.removeFromTop(32);
+  mTimingLabel.setBounds(timing.removeFromLeft(145));
+  mTiming.setBounds(timing.reduced(0, 3));
+  auto curve = bounds.removeFromTop(32);
+  mCurveLabel.setBounds(curve.removeFromLeft(145));
+  mCurve.setBounds(curve.reduced(0, 3));
+  bounds.removeFromTop(6);
+  mEcoTweakHelp.setBounds(bounds);
 }

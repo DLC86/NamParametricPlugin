@@ -154,6 +154,8 @@ NamParametricPluginAudioProcessor::NamParametricPluginAudioProcessor()
   mInputCalibrationParam = mValueTree.getRawParameterValue(ParamIDs::inputCalibration);
   mOutputModeParam = mValueTree.getRawParameterValue(ParamIDs::outputMode);
   mControlTransitionParam = mValueTree.getRawParameterValue(ParamIDs::controlTransition);
+  mEcoTimingPresetParam = mValueTree.getRawParameterValue(ParamIDs::ecoTimingPreset);
+  mEcoInterpolationCurveParam = mValueTree.getRawParameterValue(ParamIDs::ecoInterpolationCurve);
   startTimerHz(30);
 }
 
@@ -212,10 +214,15 @@ void NamParametricPluginAudioProcessor::processBlock(juce::AudioBuffer<float>& b
 
   TryPromoteStagedModel();
   TryPromoteStagedIr();
-  if (mActiveProcessingState != nullptr)
-    mActiveProcessingState->model->SetControlTransition(
+  if (mActiveProcessingState != nullptr) {
+    auto& engine = *mActiveProcessingState->model;
+    engine.SetControlTransition(
         mControlTransitionParam->load() >= 0.5f ? namparametric::dsp::ControlTransition::Crossfade
                                                 : namparametric::dsp::ControlTransition::Eco);
+    engine.SetEcoTweakSettings(
+        static_cast<int>(mEcoTimingPresetParam->load()),
+        static_cast<int>(mEcoInterpolationCurveParam->load()));
+  }
   ApplyPendingRuntimeParameterChanges();
 
   float inputGainDb = mInputGainParam != nullptr ? mInputGainParam->load() : 0.0f;
@@ -303,6 +310,15 @@ NamParametricPluginAudioProcessor::CreateParameterLayout() {
   params.push_back(std::make_unique<juce::AudioParameterChoice>(
       juce::ParameterID(ParamIDs::controlTransition, 1), "Control smoothing",
       juce::StringArray{"Eco de-click", "Crossfade"}, 0));
+  // Temporary experiment controls, appended without changing existing parameter IDs.
+  params.push_back(std::make_unique<juce::AudioParameterChoice>(
+      juce::ParameterID(ParamIDs::ecoTimingPreset, 1), "Eco update / ramp (test)",
+      juce::StringArray{"20 / 40 ms (default)", "20 / 60 ms", "20 / 20 ms",
+                        "30 / 30 ms", "40 / 40 ms"}, 0));
+  params.push_back(std::make_unique<juce::AudioParameterChoice>(
+      juce::ParameterID(ParamIDs::ecoInterpolationCurve, 1), "Eco weight curve (test)",
+      juce::StringArray{"Smoothstep (cubic)", "Smootherstep (quintic)",
+                        "Linear", "Septic (C3)"}, 0));
 
   return {params.begin(), params.end()};
 }

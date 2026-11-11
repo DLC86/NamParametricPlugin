@@ -26,6 +26,8 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
     static constexpr const char* inputCalibration = "inputCalibration";
     static constexpr const char* outputMode = "outputMode";
     static constexpr const char* controlTransition = "controlTransition";
+    static constexpr const char* ecoTimingPreset = "ecoTimingPreset";
+    static constexpr const char* ecoInterpolationCurve = "ecoInterpolationCurve";
   };
 
   struct RuntimeParameterInfo {
@@ -237,6 +239,8 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
   std::atomic<float>* mInputCalibrationParam = nullptr;
   std::atomic<float>* mOutputModeParam = nullptr;
   std::atomic<float>* mControlTransitionParam = nullptr;
+  std::atomic<float>* mEcoTimingPresetParam = nullptr;
+  std::atomic<float>* mEcoInterpolationCurveParam = nullptr;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NamParametricPluginAudioProcessor)
 };
