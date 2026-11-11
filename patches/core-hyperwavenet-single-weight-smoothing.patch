@@ -66,7 +66,7 @@ diff --git a/NAM/wavenet/hyperwavenet.cpp b/NAM/wavenet/hyperwavenet.cpp
  , _dirty(true)
  , _param_dim(static_cast<int>(_param_specs.size()))
  {
-@@ -206,17 +210,95 @@
+@@ -206,17 +210,101 @@
    return _param_specs;
  }
  
@@ -102,6 +102,12 @@ diff --git a/NAM/wavenet/hyperwavenet.cpp b/NAM/wavenet/hyperwavenet.cpp
 +      std::copy(_conditioned.begin(), _conditioned.end(), _smoothed_weights.begin());
 +      WaveNet::set_weights_(_smoothed_weights);
 +      _has_applied_weights = true;
++      _smooth_position = _smooth_frames;
++    }
++    else if (_smoothed_weights == _conditioned)
++    {
++      // Different control positions can generate identical weights. Avoid
++      // needless segmentation and preserve sample-exact unchanged audio.
 +      _smooth_position = _smooth_frames;
 +    }
 +    else
