@@ -407,6 +407,17 @@ void NamModelEngine::Reset(double sampleRate, int maxBlockSize) {
   mCorrectionStart = mLastRaw = mPreviousRaw = mPredictionError = mRawPeak = 0.0f;
   mErrorDecay = static_cast<float>(std::exp(-1.0 / (rate * 0.010)));
   mPeakDecay = static_cast<float>(std::exp(-1.0 / (rate * 0.050)));
+  // A single active HyperWaveNet now eases conditioned *weights*, not the
+  // audio output. Reconditioning remains throttled at 20 ms independently.
+  // Interpolation is split into 1 ms chunks for a 40 ms transition.
+  if (auto* model = dynamic_cast<nam::wavenet::HyperWaveNet*>(mModel.get()))
+    model->ConfigureWeightSmoothing(
+        mActiveTransition == ControlTransition::Eco
+            ? std::max(1, static_cast<int>(std::lround(rate * 0.040)))
+            : 0,
+        std::max(1, static_cast<int>(std::lround(rate * 0.001))));
+  if (auto* model = dynamic_cast<nam::wavenet::HyperWaveNet*>(mTransitionModel.get()))
+    model->ConfigureWeightSmoothing(0, 1);
   if (mTransitionControl != nullptr) {
     mParametricControl->SetParams(mParameterValues);
     mTransitionControl->SetParams(mParameterValues);
@@ -461,8 +472,12 @@ void NamModelEngine::ProcessModelInternal(float* input, float* output, int numSa
     mModel->process(&input, &output, numSamples);
     return;
   }
+  // Do not leave Eco midway through a weight ramp: finish it with the
+  // existing one network before waking the second network for Crossfade.
+  const auto* smoothing = dynamic_cast<const nam::wavenet::HyperWaveNet*>(mModel.get());
   if (mRequestedTransition != mActiveTransition && !mFading &&
-      mCorrectionPosition >= mCorrectionLength) {
+      mCorrectionPosition >= mCorrectionLength &&
+      (smoothing == nullptr || !smoothing->HasActiveWeightSmoothing())) {
     mActiveTransition = mRequestedTransition;
     mRawHistory = mPredictionSkip = 0;
     mPredictionError = mRawPeak = 0.0f;
@@ -470,6 +485,12 @@ void NamModelEngine::ProcessModelInternal(float* input, float* output, int numSa
     if (mActiveTransition == ControlTransition::Eco) {
       // Switching modes should not delay the first live Eco control change.
       mEcoCooldownRemaining = 0;
+      if (auto* model = dynamic_cast<nam::wavenet::HyperWaveNet*>(mModel.get()))
+        model->ConfigureWeightSmoothing(
+            std::max(1, static_cast<int>(std::lround(
+                GetModelSampleRateForProcessing() * 0.040))),
+            std::max(1, static_cast<int>(std::lround(
+                GetModelSampleRateForProcessing() * 0.001))));
       mLastRaw = mLastOutput;
       mPreviousRaw = mPreviousOutput;
       mRawHistory = mOutputHistory;
@@ -477,6 +498,8 @@ void NamModelEngine::ProcessModelInternal(float* input, float* output, int numSa
       mPredictionError = 2.0f * std::abs(mLastRaw - mPreviousRaw);
     }
     if (mActiveTransition == ControlTransition::Crossfade) {
+      if (auto* model = dynamic_cast<nam::wavenet::HyperWaveNet*>(mModel.get()))
+        model->ConfigureWeightSmoothing(0, 1);
       // The standby was asleep in Eco. Rebuild its history inaudibly at the
       // current controls before letting it take part in a parameter crossfade.
       mTransitionControl->SetParams(mRenderedValues);
@@ -554,6 +577,11 @@ void NamModelEngine::ProcessEco(float* input, float* output, int numSamples) {
   }
   mModel->process(&input, &output, numSamples);
   mEcoCooldownRemaining = std::max(0, mEcoCooldownRemaining - numSamples);
+  // With weight interpolation the old prediction-based output correction is
+  // unnecessary, and itself may inject audible transients on a silent input.
+  // Preserve it only for parametric cores that do not support weight smoothing.
+  if (dynamic_cast<nam::wavenet::HyperWaveNet*>(mModel.get()) != nullptr)
+    return;
   for (int i = 0; i < numSamples; ++i) {
     const float raw = output[i];
     const float prediction = 2.0f * mLastRaw - mPreviousRaw;
