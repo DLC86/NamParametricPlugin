@@ -229,12 +229,17 @@ void TestSilentControlSweeps(const std::filesystem::path& path, const Json& hype
     }
     return out;
   };
-  Render(eco, 16000, 257);
-  Render(crossfade, 16000, 257);
-  rawSilent(16000);
+  // Keep the actual last steady-state sample as the derivative reference.
+  // These models can output a nonzero DC bias at exactly zero digital input:
+  // comparing the first sweep sample against literal zero would instead
+  // measure the *DC level*, not a control-change click, in every mode.
+  const float ecoPreviousBefore = Render(eco, 16000, 257).back();
+  const float crossfadePreviousBefore = Render(crossfade, 16000, 257).back();
+  const float rawPreviousBefore = rawSilent(16000).back();
   double ecoPeak = 0.0, rawPeak = 0.0, crossfadePeak = 0.0;
   double ecoPower = 0.0, rawPower = 0.0;
-  float ecoPrevious = 0.0f, rawPrevious = 0.0f, crossfadePrevious = 0.0f;
+  float ecoPrevious = ecoPreviousBefore, rawPrevious = rawPreviousBefore;
+  float crossfadePrevious = crossfadePreviousBefore;
   for (const auto values : {std::vector<float>{9, 1, 2}, {1, 0, 0},
                             {10, 0, 2}, {2, 1, 1}}) {
     Check(eco.SetParameterValues(values) && crossfade.SetParameterValues(values),
