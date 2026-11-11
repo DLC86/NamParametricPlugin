@@ -36,7 +36,7 @@ diff --git a/NAM/wavenet/hyperwavenet.h b/NAM/wavenet/hyperwavenet.h
  private:
    std::vector<ParamSpec> _param_specs;
    std::vector<float> _params;
-@@ -52,6 +59,14 @@
+@@ -52,6 +59,15 @@
    std::vector<float> _base_weights;
    std::vector<float> _conditioned;
 +  std::vector<float> _smoothed_weights;
@@ -47,6 +47,7 @@ diff --git a/NAM/wavenet/hyperwavenet.h b/NAM/wavenet/hyperwavenet.h
 +  bool _has_applied_weights = false;
 +  int _smooth_frames = 0;
 +  int _smooth_step_frames = 1;
++  int _smooth_step_remaining = 0;
 +  int _smooth_position = 0;
    bool _dirty = true;
    int _param_dim = 0;
@@ -66,7 +67,7 @@ diff --git a/NAM/wavenet/hyperwavenet.cpp b/NAM/wavenet/hyperwavenet.cpp
  , _dirty(true)
  , _param_dim(static_cast<int>(_param_specs.size()))
  {
-@@ -206,17 +210,101 @@
+@@ -206,17 +210,111 @@
    return _param_specs;
  }
  
@@ -75,6 +76,7 @@ diff --git a/NAM/wavenet/hyperwavenet.cpp b/NAM/wavenet/hyperwavenet.cpp
 +  const bool was_enabled = _smooth_frames > 0;
 +  _smooth_frames = std::max(0, transition_frames);
 +  _smooth_step_frames = std::max(1, step_frames);
++  _smooth_step_remaining = 0;
 +  if (_smooth_frames == 0)
 +    _smooth_position = 0; // process() commits the pending target without interpolation.
 +  else if (!was_enabled)
@@ -116,6 +118,7 @@ diff --git a/NAM/wavenet/hyperwavenet.cpp b/NAM/wavenet/hyperwavenet.cpp
 +      // weight vector. No second audio network or allocation is required.
 +      std::copy(_smoothed_weights.begin(), _smoothed_weights.end(), _start_weights.begin());
 +      _smooth_position = 0;
++      _smooth_step_remaining = 0;
 +    }
      _dirty = false;
    }
@@ -141,23 +144,31 @@ diff --git a/NAM/wavenet/hyperwavenet.cpp b/NAM/wavenet/hyperwavenet.cpp
 +  int offset = 0;
 +  while (offset < num_frames && _smooth_position < _smooth_frames)
 +  {
-+    const int step = std::min({num_frames - offset, _smooth_step_frames,
-+                               _smooth_frames - _smooth_position});
-+    _smooth_position += step;
-+    const float position = static_cast<float>(_smooth_position) / static_cast<float>(_smooth_frames);
-+    const float alpha = position * position * (3.0f - 2.0f * position);
-+    for (size_t i = 0; i < _smoothed_weights.size(); ++i)
-+      _smoothed_weights[i] = _start_weights[i] + alpha * (_conditioned[i] - _start_weights[i]);
-+    if (_smooth_position == _smooth_frames)
-+      std::copy(_conditioned.begin(), _conditioned.end(), _smoothed_weights.begin());
-+    WaveNet::set_weights_(_smoothed_weights);
-+
++    if (_smooth_step_remaining == 0)
++    {
++      // Keep a fixed 0.5 ms grid across host/resampler blocks, so short
++      // buffers do not force an expensive coefficient reload every call.
++      const float position = static_cast<float>(_smooth_position) / static_cast<float>(_smooth_frames);
++      const float alpha = position * position * (3.0f - 2.0f * position);
++      for (size_t i = 0; i < _smoothed_weights.size(); ++i)
++        _smoothed_weights[i] = _start_weights[i] + alpha * (_conditioned[i] - _start_weights[i]);
++      WaveNet::set_weights_(_smoothed_weights);
++      _smooth_step_remaining = std::min(_smooth_step_frames, _smooth_frames - _smooth_position);
++    }
++    const int step = std::min(num_frames - offset, _smooth_step_remaining);
 +    for (size_t ch = 0; ch < _smooth_input_ptrs.size(); ++ch)
 +      _smooth_input_ptrs[ch] = input[ch] + offset;
 +    for (size_t ch = 0; ch < _smooth_output_ptrs.size(); ++ch)
 +      _smooth_output_ptrs[ch] = output[ch] + offset;
 +    WaveNet::process(_smooth_input_ptrs.data(), _smooth_output_ptrs.data(), step);
 +    offset += step;
++    _smooth_position += step;
++    _smooth_step_remaining -= step;
++    if (_smooth_position == _smooth_frames)
++    {
++      std::copy(_conditioned.begin(), _conditioned.end(), _smoothed_weights.begin());
++      WaveNet::set_weights_(_smoothed_weights);
++    }
 +  }
 +  if (offset < num_frames)
 +  {
