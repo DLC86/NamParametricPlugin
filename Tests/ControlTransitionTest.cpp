@@ -292,6 +292,51 @@ void TestSilentControlSweeps(const std::filesystem::path& path, const Json& hype
         "Weight interpolation did not sufficiently reduce zero-input step peaks");
 }
 
+// Exercise the same single-network weight ramp with a real nonzero,
+// time-varying signal. The final waveform must converge to a reference model
+// initialized at the destination (for both HyperA2 submodel sizes), rather
+// than merely reaching the right DC value in the silence tests.
+void TestEcoNonzeroSignalSettling(const std::filesystem::path& path, ModelSize size) {
+  using namparametric::dsp::ControlTransition;
+  NamModelEngine eco, target;
+  std::string error;
+  for (auto* model : {&eco, &target}) {
+    model->SetControlTransition(ControlTransition::Eco);
+    Check(model->LoadModel(path.string(), error, size), error.c_str());
+  }
+  const std::vector<float> destination{9.0f, 1.0f, 2.0f};
+  Check(target.SetParameterValues(destination), "Tone reference rejected final controls");
+  eco.Reset(48000, 257);
+  target.Reset(48000, 257);
+  constexpr int block = 257;
+  std::vector<float> input(block), ecoOut(block), targetOut(block);
+  float maximumError = 0.0f;
+  for (int chunk = 0; chunk < 160; ++chunk) {
+    if (chunk == 20)
+      Check(eco.SetParameterValues(destination), "Tone Eco rejected destination");
+    // Two incommensurate tones probe changing nonlinear state, not just DC.
+    for (int i = 0; i < block; ++i) {
+      const double t = static_cast<double>(chunk * block + i) / 48000.0;
+      input[i] = static_cast<float>(
+          0.15 * std::sin(6.283185307179586 * 440.0 * t) +
+          0.07 * std::sin(6.283185307179586 * 3197.0 * t));
+    }
+    eco.Process(input.data(), ecoOut.data(), block);
+    target.Process(input.data(), targetOut.data(), block);
+    for (int i = 0; i < block; ++i) {
+      Check(std::isfinite(ecoOut[i]) && std::isfinite(targetOut[i]),
+            "Eco weight smoothing produced non-finite nonzero audio");
+      if (chunk > 130)
+        maximumError = std::max(maximumError, std::abs(ecoOut[i] - targetOut[i]));
+    }
+  }
+  Check(maximumError < 1e-4f,
+        "Eco nonzero-signal audio does not settle on the exact destination network");
+  std::cout << "Nonzero two-tone Eco settle error, size="
+            << (size == ModelSize::Full ? "Full" : "Lite")
+            << ": " << maximumError << '\n';
+}
+
 void TestEcoUnaffectedSignal(const std::filesystem::path& directory, Json hyper) {
   // Zero the hypernetwork, leaving the audio base intact. Knob movement now
   // changes no weights: the de-click must not invent a transient on ordinary audio.
@@ -437,10 +482,13 @@ void TestControlTransitions(const std::filesystem::path& directory, const Json& 
   }
   TestEcoUnaffectedSignal(directory, hyper);
   TestSilentControlSweeps(directory / "transition_hyper.nam", hyper);
+  TestEcoNonzeroSignalSettling(directory / "transition_hyper.nam", ModelSize::Full);
   // Both selectable A2 branches must satisfy the exact-zero-input transient
   // criterion with their own real neural weights (never a second DSP in Eco).
-  for (auto size : {ModelSize::Full, ModelSize::Lite})
+  for (auto size : {ModelSize::Full, ModelSize::Lite}) {
     TestSilentControlSweeps(directory / "transition_a2.nam", RawA2Branch(a2, size), size);
+    TestEcoNonzeroSignalSettling(directory / "transition_a2.nam", size);
+  }
   // Cost probe uses the same HyperWaveNet, audio and block size for raw core
   // and plugin smoothing. Report, rather than assert, machine-dependent timing.
   auto raw = nam::get_dsp(hyper);
