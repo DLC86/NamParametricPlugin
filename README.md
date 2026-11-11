@@ -4,7 +4,7 @@
 with **single-network weight interpolation** for HyperWaveNet / HyperA2.
 The hypernetwork generates target weights at most once every 20 ms, and
 the *same* WaveNet interpolates between active and target coefficients over
-40 ms, with one update per 1 ms of model audio. Rapid retargets start from
+40 ms, with one update per 0.5 ms of model audio. Rapid retargets start from
 the currently applied weights, without running a second audio model. The
 original Crossfade mode remains available for direct comparisons, with its
 two-network behavior unchanged. This approach trades some additional
