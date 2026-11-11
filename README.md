@@ -1,5 +1,18 @@
 # NamParametricPlugin
 
+**Version 0.5.2 (prototype, draft)** replaces Eco's output-side step predictor
+with **single-network weight interpolation** for HyperWaveNet / HyperA2.
+The hypernetwork generates target weights at most once every 20 ms, and
+the *same* WaveNet interpolates between active and target coefficients over
+40 ms, with one update per 1 ms of model audio. Rapid retargets start from
+the currently applied weights, without running a second audio model. The
+original Crossfade mode remains available for direct comparisons, with its
+two-network behavior unchanged. This approach trades some additional
+weight-copy CPU during knob movement for avoiding hard weight jumps.
+No model format change or retraining is required. Sound quality and resource
+costs depend on the model and host hardware; this draft is intended for
+testing, especially with zero digital input.
+
 **Version 0.5.1 (draft)** adds a model-sample-time rate limiter to the
 default **Eco de-click** mode: neural weights are reconditioned at most once
 every **20 ms**. Rapid knob and switch automation is coalesced to the latest
