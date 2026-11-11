@@ -40,5 +40,6 @@ jobs:
           path: |
             direct-kernel-results
             direct-kernel-core.patch
+            build/direct-core/real_pnam_kernel_probe
           if-no-files-found: warn
           retention-days: 30
