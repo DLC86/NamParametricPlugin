@@ -67,16 +67,19 @@ diff --git a/NAM/wavenet/hyperwavenet.cpp b/NAM/wavenet/hyperwavenet.cpp
  , _dirty(true)
  , _param_dim(static_cast<int>(_param_specs.size()))
  {
-@@ -206,17 +210,82 @@
+@@ -206,17 +210,95 @@
    return _param_specs;
  }
  
 +void HyperWaveNet::ConfigureWeightSmoothing(const int transition_frames, const int step_frames) noexcept
 +{
++  const bool was_enabled = _smooth_frames > 0;
 +  _smooth_frames = std::max(0, transition_frames);
 +  _smooth_step_frames = std::max(1, step_frames);
 +  if (_smooth_frames == 0)
 +    _smooth_position = 0; // process() commits the pending target without interpolation.
++  else if (!was_enabled)
++    _smooth_position = _smooth_frames; // Merely enabling smoothing must not trigger a ramp.
 +}
 +
 +bool HyperWaveNet::HasActiveWeightSmoothing() const noexcept
@@ -131,7 +134,7 @@ diff --git a/NAM/wavenet/hyperwavenet.cpp b/NAM/wavenet/hyperwavenet.cpp
 +  }
 +
 +  int offset = 0;
-+  while (offset < num_frames)
++  while (offset < num_frames && _smooth_position < _smooth_frames)
 +  {
 +    const int step = std::min({num_frames - offset, _smooth_step_frames,
 +                               _smooth_frames - _smooth_position});
@@ -140,6 +143,8 @@ diff --git a/NAM/wavenet/hyperwavenet.cpp b/NAM/wavenet/hyperwavenet.cpp
 +    const float alpha = position * position * (3.0f - 2.0f * position);
 +    for (size_t i = 0; i < _smoothed_weights.size(); ++i)
 +      _smoothed_weights[i] = _start_weights[i] + alpha * (_conditioned[i] - _start_weights[i]);
++    if (_smooth_position == _smooth_frames)
++      std::copy(_conditioned.begin(), _conditioned.end(), _smoothed_weights.begin());
 +    WaveNet::set_weights_(_smoothed_weights);
 +
 +    for (size_t ch = 0; ch < _smooth_input_ptrs.size(); ++ch)
@@ -148,6 +153,14 @@ diff --git a/NAM/wavenet/hyperwavenet.cpp b/NAM/wavenet/hyperwavenet.cpp
 +      _smooth_output_ptrs[ch] = output[ch] + offset;
 +    WaveNet::process(_smooth_input_ptrs.data(), _smooth_output_ptrs.data(), step);
 +    offset += step;
++  }
++  if (offset < num_frames)
++  {
++    for (size_t ch = 0; ch < _smooth_input_ptrs.size(); ++ch)
++      _smooth_input_ptrs[ch] = input[ch] + offset;
++    for (size_t ch = 0; ch < _smooth_output_ptrs.size(); ++ch)
++      _smooth_output_ptrs[ch] = output[ch] + offset;
++    WaveNet::process(_smooth_input_ptrs.data(), _smooth_output_ptrs.data(), num_frames - offset);
 +  }
  }
  
