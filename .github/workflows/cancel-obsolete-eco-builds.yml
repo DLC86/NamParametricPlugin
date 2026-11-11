@@ -1,0 +1,33 @@
+name: Cancel obsolete Eco prototype builds
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/cancel-obsolete-eco-builds.yml']
+  workflow_dispatch:
+permissions:
+  actions: write
+  contents: read
+jobs:
+  cancel-obsolete:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Cancel only specifically identified superseded prototype CI runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The 0.5.2 prototype's latest validation is 43027358158.
+          # NEVER touch published-release or the 0.5.1 draft build.
+          for run in 43025994259 43026243889 43026455566 43026898227; do
+            name="$(gh api "repos/$GH_REPO/actions/runs/$run" --jq '.name')"
+            status="$(gh api "repos/$GH_REPO/actions/runs/$run" --jq '.status')"
+            test "$name" = "Branch Build"
+            if [[ "$status" != completed ]]; then
+              gh api -X POST "repos/$GH_REPO/actions/runs/$run/cancel" >/dev/null
+              echo "Cancelled superseded prototype run $run"
+            else
+              echo "Already finished: $run"
+            fi
+          done
