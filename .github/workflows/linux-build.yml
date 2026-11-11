@@ -42,7 +42,7 @@ jobs:
       - name: Build
         run: cmake --build build/linux-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_Standalone static_export_test hyper_a2_engine_test ir_normalization_test
       - name: Verify export and unity IR gain
-        run: xvfb-run -a ctest --test-dir build/linux-release --output-on-failure -R "^(static_export|hyper_a2_engine|ir_normalization)$"
+        run: xvfb-run -a ctest --test-dir build/linux-release --verbose -R "^(static_export|hyper_a2_engine|ir_normalization)$"
       - name: Check runtime libraries and package
         run: |
           set -euo pipefail
