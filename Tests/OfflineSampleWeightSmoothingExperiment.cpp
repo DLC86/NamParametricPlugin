@@ -27,7 +27,7 @@ constexpr int kBlockSize = 257;
 constexpr int kPrerollFrames = 16000;
 constexpr int kTransitionFrames = 1920;  // 40 ms
 constexpr int kMeasureFrames = 4800;    // 100 ms, enough to settle.
-constexpr std::array<int, 8> kSteps = {-1, 0, 192, 96, 48, 24, 8, 1};
+constexpr std::array<int, 9> kSteps = {-1, 0, 192, 96, 48, 24, 8, 1, -2};
 
 void Require(bool ok, const std::string& error) {
   if (!ok) throw std::runtime_error(error);
@@ -55,6 +55,7 @@ Json SelectBranch(const Json& container, bool lite) {
 }
 
 std::string StepName(int frames) {
+  if (frames == -2) return "kernel_sample_1";
   if (frames == -1) return "unchanged";
   if (frames == 0) return "instant";
   if (frames == 1) return "sample_1";
@@ -97,8 +98,8 @@ Result Run(const Json& source, int stepFrames, const std::vector<float>& input) 
     float* out = preroll.data() + offset;
     model->process(&in, &out, count);
   }
-  hyper->ConfigureWeightSmoothing(stepFrames > 0 ? kTransitionFrames : 0,
-                                  std::max(1, stepFrames));
+  hyper->ConfigureWeightSmoothing(stepFrames == -2 || stepFrames > 0 ? kTransitionFrames : 0,
+                                  stepFrames == -2 ? 0 : std::max(1, stepFrames));
   if (stepFrames != -1) {
     const std::vector<float> target{8.0f, 1.0f};
     dynamic_cast<nam::IParametricControl&>(*model).SetParams(target);
@@ -239,7 +240,20 @@ int main(int argc, char* argv[]) {
           results.reserve(kSteps.size());
           for (int step : kSteps) results.emplace_back(Run(branch, step, input));
           const Result& unchanged = results.front();
-          const Result& samplewise = results.back();
+          const Result& samplewise = results[results.size() - 2];
+          const Result& kernelwise = results.back();
+          double kernelMax = 0., kernelRms = 0.;
+          for (size_t n = 0; n < samplewise.output.size(); ++n) {
+            const double d = static_cast<double>(kernelwise.output[n]) - samplewise.output[n];
+            kernelMax = std::max(kernelMax, std::abs(d));
+            kernelRms += d * d;
+          }
+          kernelRms = std::sqrt(kernelRms / samplewise.output.size());
+          std::cout << "KERNEL_vs_RELOAD model=" << flavor
+                    << " size=" << (lite ? "lite" : "full")
+                    << " input=" << (tone ? "tone" : "silence")
+                    << " max=" << kernelMax << " rms=" << kernelRms << "\n";
+          Require(kernelMax < 0.002, "Kernel per-sample output diverges from one-sample reload reference");
           const std::string stem = std::string(flavor) + (lite ? "_lite_" : "_full_") +
                                    (tone ? "tone" : "silence");
           WriteWaveforms(outputDir / (stem + "_waveforms.csv"), results);
