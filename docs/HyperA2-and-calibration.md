@@ -73,6 +73,41 @@ compression/distortion; this is independent of the output gain correction.
 
 ## Smooth HyperWaveNet / HyperA2 controls
 
+### 0.5.2 prototype: one-network weight-space smoothing
+
+This opt-in implementation is enabled only for Eco and the HyperWaveNet
+audio core used by parametric HyperA2 Full/Lite. Its important invariant is
+that **one WaveNet executes audio at any instant**. The existing extra
+standby object is not processed in Eco (it is kept only for the separate,
+user-selectable Crossfade mode).
+
+On a requested control change, the existing 20 ms model-sample rate limiter
+coalesces requests. HyperWaveNet evaluates its hypernetwork **once** to
+generate `targetWeights`. The already-running WaveNet keeps its DSP history,
+and the core linearly interpolates each coefficient from the currently
+applied weight vector to `targetWeights`, using a smoothstep time curve over
+40 ms and 1 ms internal processing increments. The full weight set is
+loaded into the *same* DSP; there is no second inference and no repeated
+hypernetwork calculation at every step. If a new target arrives while
+smoothing, interpolation starts from the weights currently in use. When the
+weights are identical, no splitting or reloading occurs. The old 5 ms
+output-prediction correction is bypassed for this architecture because it
+could add its own transient even with digital-zero input.
+
+The original behavior is preserved for models whose core does not expose
+weight-space smoothing, and Crossfade itself is unchanged. Switching from
+Eco to Crossfade waits for an in-progress weight interpolation to finish
+before warming the inactive second instance. Linear Volume continues to
+smooth independently with no hypernetwork update.
+
+The exact 1/40 ms values are *prototype choices*, not a claim that every
+trained neural model will be artifact-free. One-network inference saves
+the continuous CPU cost of a dual-network transition but loading weights
+more often has its own cost. We test sample-exact zero-input sweeps,
+control retargeting, full/lite models and compare peak/rms derivative with
+instantaneous weights. Tests on real captured amplifier models remain
+important before declaring the solution production-ready.
+
 ### 0.5.1 Eco reconditioning rate limit
 
 Eco now limits hypernetwork weight recomputation to **one every 20 ms of
