@@ -1,5 +1,18 @@
 # NamParametricPlugin
 
+**Version 0.5.3** fixes macOS Standalone recording permission: the packaged
+`Info.plist` now declares why the standalone needs access to CoreAudio
+microphone/instrument inputs. The macOS operating-system privacy prompt can
+therefore grant access to the selected audio interface, including a PreSonus
+Studio 26c. The Standalone's **original startup input mute and its visible
+feedback-warning notification are intentionally unchanged**. To hear the
+guitar, open the notification's **Settings...** button, select the correct
+input/output device and channel, then clear **Mute audio input**. Also permit
+the standalone under **System Settings → Privacy & Security → Microphone**,
+if requested; restart the standalone after changing a previously denied
+permission. This is a focused host/packaging fix: AU, VST3, model processing,
+GEMM weight smoothing and the version-update LED are unchanged.
+
 **Version 0.5.2** optimizes the **per-sample linear weight ramps** using
 preallocated Eigen matrix multiplications for changing convolution kernels:
 the active audio engine remains a single network, with the same fixed
