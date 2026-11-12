@@ -16,7 +16,7 @@ on:
         type: string
         default: ""
   push:
-    branches: [main, codex/hyper-a2-support, experiment/direct-kernel-weight-smoothing]
+    branches: [main, feature/0.5.2-gemm-update-led]
     paths:
       - '.github/workflows/branch-build.yml'
       - '.github/workflows/linux-build.yml'

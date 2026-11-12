@@ -1,5 +1,19 @@
 # NamParametricPlugin
 
+**Version 0.5.2** optimizes the **per-sample linear weight ramps** using
+preallocated Eigen matrix multiplications for changing convolution kernels:
+the active audio engine remains a single network, with the same fixed
+**100 ms update / 100 ms Linear interpolation**. No external hypernetwork
+thread is introduced. NeuralAudio's equivalent A2 GEMM optimization was
+validated with deterministic audio/CPU benchmarks before being ported to
+the plugin's separate parametric core.
+
+The plugin now **silently checks for published updates** when the UI opens,
+outside the audio callback. When a newer version exists, a small red LED
+beside Settings blinks; clicking it opens the official GitHub release.
+No startup dialog, automatic download, update installation or audio-thread
+network activity. If offline or GitHub is unavailable, nothing is shown.
+
 **Version 0.5.1 (draft)** adopts a single-network **100 ms weight-update
 interval** and **100 ms linear per-sample smoothing** directly in the
 HyperWaveNet convolution kernels. The earlier two-network Crossfade, old
