@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(NamParametricPlugin VERSION 0.5.1)
+project(NamParametricPlugin VERSION 0.5.2)
 
 include(CTest)
 
@@ -91,6 +91,20 @@ if(NOT PNAM_DIRECT_KERNEL_RESULT EQUAL 0)
     "${PNAM_DIRECT_KERNEL_ERROR}")
 endif()
 message(STATUS "${PNAM_DIRECT_KERNEL_OUTPUT}")
+
+# Final GEMM implementation: retain per-sample linear alpha and one DSP, but
+# replace scalar delta-weight products with preallocated Eigen matrix kernels.
+execute_process(
+  COMMAND "${Python3_EXECUTABLE}"
+          "${CMAKE_CURRENT_LIST_DIR}/patches/apply-gemm-delta-kernel.py"
+          "${NAM_CORE_DIR}"
+  RESULT_VARIABLE PNAM_GEMM_RESULT
+  OUTPUT_VARIABLE PNAM_GEMM_OUTPUT
+  ERROR_VARIABLE PNAM_GEMM_ERROR)
+if(NOT PNAM_GEMM_RESULT EQUAL 0)
+  message(FATAL_ERROR "GEMM delta-kernel smoothing could not be installed: ${PNAM_GEMM_ERROR}")
+endif()
+message(STATUS "${PNAM_GEMM_OUTPUT}")
 
 file(GLOB NAM_CORE_SOURCES CONFIGURE_DEPENDS
   ${NAM_CORE_NAM_DIR}/*.cpp
@@ -251,9 +265,19 @@ target_include_directories(${TARGET_NAME} SYSTEM PRIVATE
   ${NAM_CORE_NLOHMANN_DIR}
 )
 
+# Version discovery runs only in the UI's background worker. On Linux JUCE
+# needs system libcurl for HTTPS; macOS/Windows use their native networking.
+if(UNIX AND NOT APPLE)
+  find_package(CURL REQUIRED)
+  set(PNAM_UPDATE_USE_CURL 1)
+  target_link_libraries(${TARGET_NAME} PRIVATE CURL::libcurl)
+else()
+  set(PNAM_UPDATE_USE_CURL 0)
+endif()
+
 target_compile_definitions(${TARGET_NAME} PRIVATE
   JUCE_WEB_BROWSER=0
-  JUCE_USE_CURL=0
+  JUCE_USE_CURL=${PNAM_UPDATE_USE_CURL}
   JUCE_VST3_CAN_REPLACE_VST2=0
   EIGEN_MPL2_ONLY=1
   EIGEN_NO_DEBUG=1
