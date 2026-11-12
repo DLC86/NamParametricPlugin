@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <numeric>
 #include <numbers>
 #include <stdexcept>
 
@@ -28,6 +29,48 @@ namespace namparametric::dsp {
 
 namespace {
 constexpr double kAssumedUnknownModelSampleRate = 48000.0;
+
+// New "options" metadata is visual only. NAM Core still expects enum_names
+// in the original neural value order, without changing the one-hot encoding.
+void NormalizeSwitchOptions(nlohmann::json& config) {
+  if (!config.is_object()) return;
+  if (config.contains("params") && config["params"].is_array()) {
+    for (auto& param : config["params"]) {
+      if (!param.is_object() || !param.contains("options")) continue;
+      if (param.value("type","")!="switch")
+        throw std::runtime_error("Only switch controls may have options");
+      const auto& options=param.at("options");
+      if (!options.is_array() || options.size()<2)
+        throw std::runtime_error("Switch options must be an array with at least two entries");
+      std::vector<std::string> names(options.size());
+      std::vector<bool> usedValue(options.size(),false),usedDisplay(options.size(),false);
+      for (const auto& option: options) {
+        if (!option.is_object() || !option.contains("name") || !option["name"].is_string()
+            || !option.contains("value") || !option["value"].is_number_integer()
+            || !option.contains("index_sw") || !option["index_sw"].is_number_integer())
+          throw std::runtime_error("Each switch option requires name, value and index_sw");
+        const int value=option["value"].get<int>(), display=option["index_sw"].get<int>();
+        if (value<0 || display<0 || static_cast<size_t>(value)>=options.size() ||
+            static_cast<size_t>(display)>=options.size() ||
+            usedValue[static_cast<size_t>(value)] || usedDisplay[static_cast<size_t>(display)])
+          throw std::runtime_error("Switch value/index_sw must be unique 0..N-1 permutations");
+        names[static_cast<size_t>(value)]=option["name"].get<std::string>();
+        usedValue[static_cast<size_t>(value)]=usedDisplay[static_cast<size_t>(display)]=true;
+      }
+      if (param.contains("enum_names") && !param["enum_names"].is_null() &&
+          param["enum_names"] != names)
+        throw std::runtime_error("Switch options disagree with enum_names");
+      param["enum_names"]=names;
+      param.erase("options");
+    }
+  }
+  if (config.contains("submodels") && config["submodels"].is_array())
+    for (auto& child: config["submodels"])
+      if (child.is_object() && child.contains("config"))
+        NormalizeSwitchOptions(child["config"]);
+  if (config.contains("base_config"))
+    NormalizeSwitchOptions(config["base_config"]);
+}
 
 size_t ReadCount(const nlohmann::json& entry, const char* key) {
   const auto& value = entry.at(key);
@@ -140,8 +183,11 @@ nlohmann::json BakeWaveNet(const nlohmann::json& source, std::span<const float> 
 nlohmann::json NamModelEngine::BakeStaticModel(const nlohmann::json& source,
                                                const std::span<const float> values,
                                                const std::string& sourceFileName) {
-  if (const auto* gainConfig = pnam::OutputGainCurve::FindConfig(source)) {
-    auto base=pnam::OutputGainCurve::NeuralSource(source);
+  auto normalizedSource=source;
+  if (normalizedSource.contains("config"))
+    NormalizeSwitchOptions(normalizedSource["config"]);
+  if (const auto* gainConfig = pnam::OutputGainCurve::FindConfig(normalizedSource)) {
+    auto base=pnam::OutputGainCurve::NeuralSource(normalizedSource);
     pnam::OutputGainCurve curve;
     curve.Load(*gainConfig,base.at("config").at("params").size());
     if (values.size()!=base.at("config").at("params").size()+1)
@@ -163,27 +209,27 @@ nlohmann::json NamModelEngine::BakeStaticModel(const nlohmann::json& source,
     auto checked=nam::get_dsp(baked);
     return baked;
   }
-  const auto architecture = source.at("architecture").get<std::string>();
+  const auto architecture = normalizedSource.at("architecture").get<std::string>();
   nlohmann::json result;
   if (architecture == "HyperWaveNet") {
-    result = BakeWaveNet(source, values);
+    result = BakeWaveNet(normalizedSource, values);
   } else if (architecture == "HyperA2" ||
              architecture == "ParametricSlimmableContainer") {
-    result = source;
+    result = normalizedSource;
     result["version"] = nam::LATEST_FULLY_SUPPORTED_NAM_FILE_VERSION;
     result["architecture"] = "SlimmableContainer";
     result["config"] = {
         {"submodels",
          nlohmann::json::array(
              {{{"max_value", 0.5},
-               {"model", BakeWaveNet(SelectHyperA2Branch(source, ModelSize::Lite), values)}},
+               {"model", BakeWaveNet(SelectHyperA2Branch(normalizedSource, ModelSize::Lite), values)}},
               {{"max_value", 1.0},
-               {"model", BakeWaveNet(SelectHyperA2Branch(source, ModelSize::Full), values)}}})}};
+               {"model", BakeWaveNet(SelectHyperA2Branch(normalizedSource, ModelSize::Full), values)}}})}};
     result["weights"] = nlohmann::json::array();
   } else {
     throw std::runtime_error("Static export supports HyperWaveNet and parametric containers only.");
   }
-  const auto specs = nam::parse_param_specs(source.at("config"), architecture);
+  const auto specs = nam::parse_param_specs(normalizedSource.at("config"), architecture);
   nlohmann::json controls = nlohmann::json::array();
   for (size_t i = 0; i < specs.size(); ++i) {
     nlohmann::json control = {
@@ -269,6 +315,8 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
     }
     auto config = nlohmann::json::parse(stream);
     const auto original = config;
+    NormalizeSwitchOptions(config["config"]);
+    const auto originalNeural = pnam::OutputGainCurve::NeuralSource(original);
     const auto* gainConfig = pnam::OutputGainCurve::FindConfig(original);
     const bool gainWrapped = gainConfig != nullptr;
     config = pnam::OutputGainCurve::NeuralSource(config);
@@ -280,7 +328,7 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
     const bool supportsSizeSelection = hyperA2 || staticA2;
     std::shared_ptr<const nlohmann::json> exportSource;
     if (hyperA2 || config.at("architecture") == "HyperWaveNet")
-      exportSource = std::make_shared<const nlohmann::json>(gainWrapped ? original : config);
+      exportSource = std::make_shared<const nlohmann::json>(original);
     if (hyperA2) {
       config = SelectHyperA2Branch(config, size);
     } else if (staticA2) {
@@ -321,6 +369,18 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
         info.defaultValue = spec.defaultValue;
         if (spec.type == "switch") {
           info.enumNames = spec.enum_names;
+          info.enumValues.resize(spec.enum_names.size());
+          std::iota(info.enumValues.begin(), info.enumValues.end(), 0);
+          const auto& raw = originalNeural.at("config").at("params").at(loadedParams.size());
+          if (raw.contains("options")) {
+            const auto originalNames = info.enumNames;
+            for (const auto& option: raw.at("options")) {
+              const size_t visual = option.at("index_sw").get<size_t>();
+              const size_t neural = option.at("value").get<size_t>();
+              info.enumNames.at(visual)=originalNames.at(neural);
+              info.enumValues.at(visual)=static_cast<int>(neural);
+            }
+          }
         }
         loadedParams.push_back(std::move(info));
       }
