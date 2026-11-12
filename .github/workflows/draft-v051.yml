@@ -9,6 +9,11 @@ on:
 permissions:
   contents: write
 
+# A source commit change invalidates every binary from any earlier attempt.
+concurrency:
+  group: v051-draft-native-packages
+  cancel-in-progress: true
+
 jobs:
   prepare:
     runs-on: ubuntu-latest
@@ -38,9 +43,18 @@ jobs:
             -f sha="$GITHUB_SHA" -F force=true >/dev/null
           release_id=$(python3 -c 'import json;print(json.load(open("/tmp/release.json"))["id"])')
           gh api -X PATCH "repos/$GH_REPO/releases/$release_id" \
+            -f tag_name="v0.5.1" \
             -f target_commitish="$GITHUB_SHA" \
             -f body="$(cat docs/release-0.5.1.md)" \
             -F draft=true -F prerelease=true >/dev/null
+          gh api "repos/$GH_REPO/releases/$release_id" > /tmp/updated-release.json
+          python3 - <<'PY'
+          import json,os
+          r=json.load(open('/tmp/updated-release.json'))
+          assert r['tag_name']=='v0.5.1', 'Draft lost the v0.5.1 tag'
+          assert r['target_commitish']==os.environ['GITHUB_SHA'], 'Wrong release target'
+          assert r['draft'] and r['prerelease'], 'Release must stay a draft'
+          PY
           echo "Draft v0.5.1 retargeted to $GITHUB_SHA without publishing."
   build-macos:
     needs: prepare
