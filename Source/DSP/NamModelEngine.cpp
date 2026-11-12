@@ -338,7 +338,6 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
       config = std::move(child);
     }
     auto loadedModel = nam::get_dsp(config);
-    auto transitionModel = exportSource ? nam::get_dsp(config) : nullptr;
     if (loadedModel == nullptr) {
       errorMessage = "Model loader returned null model.";
       return false;
@@ -402,7 +401,6 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
           const double level = metadata[key].get<double>();
           if (std::isfinite(level)) {
             loadedModel->SetOutputLevel(level);
-            if (transitionModel) transitionModel->SetOutputLevel(level);
           }
           break;
         }
@@ -422,10 +420,7 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
     mControlValues=loadedValues;
     if (mOutputGain.enabled) mControlValues.insert(mControlValues.begin()+static_cast<std::ptrdiff_t>(mOutputGain.index),mOutputGain.defaultValue);
     mModel = std::move(loadedModel);
-    mTransitionModel = std::move(transitionModel);
-    mTransitionControl = dynamic_cast<nam::IParametricControl*>(mTransitionModel.get());
     mRenderedValues = loadedValues;
-    mFading = false;
     mExportSource = std::move(exportSource);
     mGearType = std::move(gearType);
     mSupportsSizeSelection = supportsSizeSelection;
@@ -441,278 +436,60 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
   }
 }
 
-void NamModelEngine::SetEcoTweakSettings(const int timingPreset, const int curve) noexcept {
-  mEcoTimingPreset = std::clamp(timingPreset, 0, 7);
-  mEcoCurve = std::clamp(curve, 0, 3);
-}
-
-int NamModelEngine::EcoIntervalFrames() const noexcept {
-  constexpr double intervals[] = {0.020, 0.020, 0.020, 0.030, 0.040, 0.050, 0.075, 0.100};
-  return std::max(1, static_cast<int>(std::lround(
-      GetModelSampleRateForProcessing() * intervals[mEcoTimingPreset])));
-}
-
-int NamModelEngine::EcoRampFrames() const noexcept {
-  constexpr double ramps[] = {0.040, 0.060, 0.020, 0.030, 0.040, 0.050, 0.075, 0.100};
-  return std::max(2, static_cast<int>(std::lround(
-      GetModelSampleRateForProcessing() * ramps[mEcoTimingPreset])));
-}
-
-void NamModelEngine::ApplyPendingEcoTweakSettings() noexcept {
-  if (mEcoTimingPreset == mAppliedEcoTimingPreset && mEcoCurve == mAppliedEcoCurve)
-    return;
-  auto* model = dynamic_cast<nam::wavenet::HyperWaveNet*>(mModel.get());
-  // Preserve continuity: finish the old curve before changing the ramp shape.
-  if (model != nullptr && model->HasActiveWeightSmoothing())
-    return;
-  if (model != nullptr)
-    model->ConfigureKernelSmoothing(EcoRampFrames(), mEcoCurve);
-  mEcoIntervalSamples = EcoIntervalFrames();
-  mEcoCooldownRemaining = std::min(mEcoCooldownRemaining, mEcoIntervalSamples);
-  mAppliedEcoTimingPreset = mEcoTimingPreset;
-  mAppliedEcoCurve = mEcoCurve;
-}
-
 void NamModelEngine::Reset(double sampleRate, int maxBlockSize) {
-  if (!IsLoaded()) {
-    return;
-  }
-
+  if (!IsLoaded()) return;
   mHostSampleRate = sampleRate;
-  mGainAlpha=1-std::exp(-1/(0.005*sampleRate));
-  mGainCurrent=mGainTarget;
+  mGainAlpha = 1 - std::exp(-1 / (0.005 * sampleRate));
+  mGainCurrent = mGainTarget;
   mMaxExternalBlockSize = maxBlockSize;
-  mFadeLength =
-      std::max(2, static_cast<int>(std::lround(GetModelSampleRateForProcessing() * 0.050)));
-  mFadePosition = 0;
-  mFading = false;
-  mActiveTransition = mRequestedTransition;
-  mStandbyWarmup = 0;
-  const double rate = GetModelSampleRateForProcessing();
-  mEcoIntervalSamples = EcoIntervalFrames();
-  mEcoCooldownRemaining = 0;  // First move is immediate, including after preset restore.
-  mCorrectionLength = std::max(2, static_cast<int>(std::lround(rate * 0.005)));
-  mCorrectionPosition = mCorrectionLength;
-  mRawHistory = mPredictionSkip = 0;
-  mOutputHistory = 0;
-  mLastOutput = mPreviousOutput = 0.0f;
-  mCorrectionStart = mLastRaw = mPreviousRaw = mPredictionError = mRawPeak = 0.0f;
-  mErrorDecay = static_cast<float>(std::exp(-1.0 / (rate * 0.010)));
-  mPeakDecay = static_cast<float>(std::exp(-1.0 / (rate * 0.050)));
-  // The hypernetwork update interval and interpolation curve are auditionable
-  // independently. Only one DSP network renders in Eco.
-  if (auto* model = dynamic_cast<nam::wavenet::HyperWaveNet*>(mModel.get())) {
-    if (mActiveTransition == ControlTransition::Eco)
-      model->ConfigureKernelSmoothing(EcoRampFrames(), mEcoCurve);
-    else
-      model->ConfigureWeightSmoothing(0, 1);
-  }
-  mAppliedEcoTimingPreset = mActiveTransition == ControlTransition::Eco ? mEcoTimingPreset : -1;
-  mAppliedEcoCurve = mActiveTransition == ControlTransition::Eco ? mEcoCurve : -1;
-  if (auto* model = dynamic_cast<nam::wavenet::HyperWaveNet*>(mTransitionModel.get()))
-    model->ConfigureWeightSmoothing(0, 1);
-  if (mTransitionControl != nullptr) {
+  const double modelRate = GetModelSampleRateForProcessing();
+  mUpdateIntervalSamples = std::max(1, static_cast<int>(std::lround(modelRate * 0.100)));
+  mUpdateCooldownRemaining = 0;
+  if (mParametricControl)
     mParametricControl->SetParams(mParameterValues);
-    mTransitionControl->SetParams(mParameterValues);
-    std::copy(mParameterValues.begin(), mParameterValues.end(), mRenderedValues.begin());
-  }
-
+  mRenderedValues = mParameterValues;
   if (!NeedToResample()) {
     mResamplerState.reset();
     mModel->Reset(sampleRate, maxBlockSize);
-    if (mTransitionModel) {
-      mTransitionOutput.resize(static_cast<size_t>(maxBlockSize));
-      mTransitionModel->Reset(sampleRate, maxBlockSize);
-    }
-    return;
+  } else {
+    mResamplerState = std::make_unique<ResamplerState>(modelRate);
+    mResamplerState->blockProcessFunc = [this](NAM_SAMPLE** input, NAM_SAMPLE** output,
+                                               int frames) {
+      ProcessModel(input[0], output[0], frames);
+    };
+    mResamplerState->resampler.Reset(sampleRate, maxBlockSize);
+    const double ratio = sampleRate / modelRate;
+    const int innerMax = std::max(1, static_cast<int>(
+        std::ceil(static_cast<double>(maxBlockSize) / ratio)));
+    mModel->Reset(sampleRate, innerMax);
   }
-
-  const double modelSampleRate = GetModelSampleRateForProcessing();
-  mResamplerState = std::make_unique<ResamplerState>(modelSampleRate);
-  mResamplerState->blockProcessFunc = [this](NAM_SAMPLE** input, NAM_SAMPLE** output,
-                                             int numFrames) {
-    ProcessModel(input[0], output[0], numFrames);
-  };
-  mResamplerState->resampler.Reset(sampleRate, maxBlockSize);
-
-  // Match NeuralAmpModelerPlugin block-size shaping for the encapsulated model.
-  const double upRatio = sampleRate / modelSampleRate;
-  const int maxEncapsulatedBlockSize =
-      std::max(1, static_cast<int>(std::ceil(static_cast<double>(maxBlockSize) / upRatio)));
-  mModel->Reset(sampleRate, maxEncapsulatedBlockSize);
-  if (mTransitionModel) {
-    mTransitionOutput.resize(static_cast<size_t>(maxEncapsulatedBlockSize));
-    mTransitionModel->Reset(sampleRate, maxEncapsulatedBlockSize);
-  }
+  // Neural weights change linearly at every audio sample *within* the
+  // convolution kernels; static/idle rendering stays on the original path.
+  if (auto* hyper = dynamic_cast<nam::wavenet::HyperWaveNet*>(mModel.get()))
+    hyper->ConfigureKernelSmoothing(
+        std::max(2, static_cast<int>(std::lround(modelRate * 0.100))), 2);
 }
 
 void NamModelEngine::ProcessModel(float* input, float* output, int numSamples) {
-  if (numSamples <= 0) return;
-  ProcessModelInternal(input, output, numSamples);
-  if (numSamples >= 2) {
-    mPreviousOutput = output[numSamples - 2];
-    mLastOutput = output[numSamples - 1];
-    mOutputHistory = 2;
-  } else if (numSamples == 1) {
-    mPreviousOutput = mLastOutput;
-    mLastOutput = output[0];
-    mOutputHistory = std::min(2, mOutputHistory + 1);
-  }
-}
-
-void NamModelEngine::ProcessModelInternal(float* input, float* output, int numSamples) {
-  if (!mTransitionModel) {
-    mModel->process(&input, &output, numSamples);
-    return;
-  }
-  // Do not leave Eco midway through a weight ramp: finish it with the
-  // existing one network before waking the second network for Crossfade.
-  const auto* smoothing = dynamic_cast<const nam::wavenet::HyperWaveNet*>(mModel.get());
-  if (mRequestedTransition != mActiveTransition && !mFading &&
-      mCorrectionPosition >= mCorrectionLength &&
-      (smoothing == nullptr || !smoothing->HasActiveWeightSmoothing())) {
-    mActiveTransition = mRequestedTransition;
-    mRawHistory = mPredictionSkip = 0;
-    mPredictionError = mRawPeak = 0.0f;
-    mStandbyWarmup = 0;
-    if (mActiveTransition == ControlTransition::Eco) {
-      // Switching modes should not delay the first live Eco control change.
-      mEcoCooldownRemaining = 0;
-      if (auto* model = dynamic_cast<nam::wavenet::HyperWaveNet*>(mModel.get()))
-        model->ConfigureKernelSmoothing(EcoRampFrames(), mEcoCurve);
-      mEcoIntervalSamples = EcoIntervalFrames();
-      mAppliedEcoTimingPreset = mEcoTimingPreset;
-      mAppliedEcoCurve = mEcoCurve;
-      mLastRaw = mLastOutput;
-      mPreviousRaw = mPreviousOutput;
-      mRawHistory = mOutputHistory;
-      mRawPeak = std::max(std::abs(mLastRaw), std::abs(mPreviousRaw));
-      mPredictionError = 2.0f * std::abs(mLastRaw - mPreviousRaw);
-    }
-    if (mActiveTransition == ControlTransition::Crossfade) {
-      if (auto* model = dynamic_cast<nam::wavenet::HyperWaveNet*>(mModel.get()))
-        model->ConfigureWeightSmoothing(0, 1);
-      // The standby was asleep in Eco. Rebuild its history inaudibly at the
-      // current controls before letting it take part in a parameter crossfade.
-      mTransitionControl->SetParams(mRenderedValues);
-      mStandbyWarmup = std::max(1, mTransitionModel->GetPrewarmSamples());
-    }
-  }
-  if (mActiveTransition == ControlTransition::Eco) {
-    ProcessEco(input, output, numSamples);
-    return;
-  }
   int offset = 0;
   while (offset < numSamples) {
-    if (!mFading && mRequestedTransition == ControlTransition::Eco) {
-      // Finish the current fade, then hand over on the next call. Do not
-      // start another queued fade and starve a mode change during automation.
-      auto* in = input + offset;
-      auto* out = output + offset;
-      mModel->process(&in, &out, numSamples - offset);
-      return;
+    if (mParametricControl && mParameterValues != mRenderedValues &&
+        mUpdateCooldownRemaining == 0) {
+      mParametricControl->SetParams(mParameterValues);
+      mRenderedValues = mParameterValues;
+      mUpdateCooldownRemaining = mUpdateIntervalSamples;
     }
-    if (mStandbyWarmup > 0) {
-      const int count = std::min(numSamples - offset, mStandbyWarmup);
-      auto* in = input + offset;
-      auto* out = output + offset;
-      auto* alternate = mTransitionOutput.data();
-      mTransitionModel->process(&in, &alternate, count);
-      mModel->process(&in, &out, count);
-      mStandbyWarmup -= count;
-      offset += count;
-      continue;
-    }
-    if (!mFading && mParameterValues != mRenderedValues) {
-      mTransitionControl->SetParams(mParameterValues);
-      std::copy(mParameterValues.begin(), mParameterValues.end(), mRenderedValues.begin());
-      mFadePosition = 0;
-      mFading = true;
-    }
-    const int count =
-        mFading ? std::min(numSamples - offset, mFadeLength - mFadePosition) : numSamples - offset;
+    int count = numSamples - offset;
+    if (mParametricControl && mParameterValues != mRenderedValues &&
+        mUpdateCooldownRemaining > 0)
+      count = std::min(count, mUpdateCooldownRemaining);
+    // A fixed update cadence uses model sample time and never allocates
+    // or runs a second network while the controls move.
     auto* in = input + offset;
     auto* out = output + offset;
-    auto* alternate = mTransitionOutput.data();
-    // Standby first also makes an in-place Process(input, input) safe.
-    mTransitionModel->process(&in, &alternate, count);
     mModel->process(&in, &out, count);
-    if (mFading) {
-      for (int i = 0; i < count; ++i) {
-        const float t = static_cast<float>(mFadePosition + i) / (mFadeLength - 1);
-        const float mix = t * t * (3.0f - 2.0f * t);
-        out[i] = (1.0f - mix) * out[i] + mix * alternate[i];
-      }
-      mFadePosition += count;
-      if (mFadePosition == mFadeLength) {
-        mModel.swap(mTransitionModel);
-        std::swap(mParametricControl, mTransitionControl);
-        mFading = false;
-      }
-    }
+    mUpdateCooldownRemaining = std::max(0, mUpdateCooldownRemaining - count);
     offset += count;
-  }
-}
-
-void NamModelEngine::ProcessEco(float* input, float* output, int numSamples) {
-  ApplyPendingEcoTweakSettings();
-  // A knob may be automated every host block. Coalesce all intermediate
-  // destinations and recondition at the selected *model*-sample interval,
-  // without a GUI timer, wall-clock calls, allocations or extra threads.
-  // Continue processing and running the existing 5 ms de-click while waiting.
-  const bool changed = mRequestedTransition == ControlTransition::Eco &&
-                       mEcoCooldownRemaining == 0 &&
-                       mParameterValues != mRenderedValues;
-  if (changed) {
-    mParametricControl->SetParams(mParameterValues);
-    std::copy(mParameterValues.begin(), mParameterValues.end(), mRenderedValues.begin());
-    mEcoCooldownRemaining = mEcoIntervalSamples;
-  }
-  mModel->process(&input, &output, numSamples);
-  mEcoCooldownRemaining = std::max(0, mEcoCooldownRemaining - numSamples);
-  // With weight interpolation the old prediction-based output correction is
-  // unnecessary, and itself may inject audible transients on a silent input.
-  // Preserve it only for parametric cores that do not support weight smoothing.
-  if (dynamic_cast<nam::wavenet::HyperWaveNet*>(mModel.get()) != nullptr)
-    return;
-  for (int i = 0; i < numSamples; ++i) {
-    const float raw = output[i];
-    const float prediction = 2.0f * mLastRaw - mPreviousRaw;
-    const float peak = std::max(mRawPeak, std::abs(raw));
-    if (changed && i == 0) {
-      if (mRawHistory >= 2) {
-        const float jump = raw - prediction;
-        // Ignore residuals within the signal's ordinary prediction error. This
-        // avoids treating the curvature of an unchanged high-frequency tone as
-        // a control click. Never feed the corrected audio back into this detector.
-        const float excess = std::max(0.0f, std::abs(jump) - 2.0f * mPredictionError);
-        if (excess > 1e-12f) {
-          float tail = 0.0f;
-          if (mCorrectionPosition < mCorrectionLength) {
-            const float t = static_cast<float>(mCorrectionPosition) / (mCorrectionLength - 1);
-            tail = mCorrectionStart * (1.0f - t * t * (3.0f - 2.0f * t));
-          }
-          mCorrectionStart =
-              std::clamp(tail - std::copysign(excess, jump), -2.0f * peak, 2.0f * peak);
-          mCorrectionPosition = 0;
-        }
-      }
-      mPredictionSkip = 2;
-    }
-    if (mPredictionSkip > 0)
-      --mPredictionSkip;
-    else if (mRawHistory >= 2)
-      mPredictionError = std::max(std::abs(raw - prediction), mPredictionError * mErrorDecay);
-    mRawPeak = std::max(std::abs(raw), mRawPeak * mPeakDecay);
-    if (mCorrectionPosition < mCorrectionLength) {
-      const float t = static_cast<float>(mCorrectionPosition++) / (mCorrectionLength - 1);
-      const float correction = mCorrectionStart * (1.0f - t * t * (3.0f - 2.0f * t));
-      // Only bound the correction transient; raw model audio is never limited.
-      output[i] = std::clamp(raw + correction, -peak, peak);
-    }
-    mPreviousRaw = mLastRaw;
-    mLastRaw = raw;
-    mRawHistory = std::min(2, mRawHistory + 1);
   }
 }
 
@@ -786,50 +563,28 @@ void NamModelEngine::ApplyOutputGain(float* output,int samples) noexcept {
 }
 
 bool NamModelEngine::SetParameterValues(const std::span<const float> values) noexcept {
+  if (!mParametricControl) return false;
+  const auto expected = mOutputGain.enabled ? mControlValues.size() : mParameterValues.size();
+  if (values.size() != expected || mParameterInfos.size() != expected) return false;
+  for (size_t i=0;i<values.size();++i) {
+    const auto& info=mParameterInfos[i];
+    const float value=values[i];
+    if (!std::isfinite(value) || value<info.minValue || value>info.maxValue ||
+        (info.IsSwitch() && std::round(value)!=value))
+      return false;
+  }
   if (mOutputGain.enabled) {
-    if (!mParametricControl || values.size()!=mControlValues.size()) return false;
     size_t n=0;
-    bool changed=false;
-    for (size_t i=0;i<values.size();++i) {
-      const auto& p=mParameterInfos[i];
-      if (!std::isfinite(values[i]) || values[i]<p.minValue || values[i]>p.maxValue ||
-          (p.IsSwitch() && std::round(values[i])!=values[i])) return false;
-    }
-    for (size_t i=0;i<values.size();++i) if (i!=mOutputGain.index) {
-      mGainNeuralValues[n]=values[i];
-      changed |= mParameterValues[n]!=values[i];
-      ++n;
-    }
-    try {
-      if (changed && !mTransitionControl) mParametricControl->SetParams(mGainNeuralValues);
-      std::copy(mGainNeuralValues.begin(),mGainNeuralValues.end(),mParameterValues.begin());
-      std::copy(values.begin(),values.end(),mControlValues.begin());
-      mGainTarget=mOutputGain.Evaluate(values[mOutputGain.index]);
-      return true;
-    } catch (...) {return false;}
+    for (size_t i=0;i<values.size();++i)
+      if (i!=mOutputGain.index)
+        mGainNeuralValues[n++]=values[i];
+    std::copy(mGainNeuralValues.begin(),mGainNeuralValues.end(),mParameterValues.begin());
+    std::copy(values.begin(),values.end(),mControlValues.begin());
+    mGainTarget=mOutputGain.Evaluate(values[mOutputGain.index]);
+  } else {
+    std::copy(values.begin(),values.end(),mParameterValues.begin());
   }
-  if (mParametricControl == nullptr || values.size() != mParameterValues.size()) {
-    return false;
-  }
-  try {
-    if (mTransitionControl != nullptr) {
-      // Validate before publishing a destination. Never interpolate switch indices
-      // or their one-hot encoding; each network sees an actual switch position.
-      for (size_t i = 0; i < values.size(); ++i) {
-        if (!std::isfinite(values[i])) return false;
-        const auto& info = mParameterInfos[i];
-        if (info.IsSwitch() && (std::round(values[i]) != values[i] || values[i] < 0 ||
-                                values[i] >= static_cast<float>(info.enumNames.size())))
-          return false;
-      }
-    } else {
-      mParametricControl->SetParams(values);
-    }
-    std::copy(values.begin(), values.end(), mParameterValues.begin());
-    return true;
-  } catch (...) {
-    return false;
-  }
+  return true;
 }
 
 double NamModelEngine::GetModelSampleRateForProcessing() const {

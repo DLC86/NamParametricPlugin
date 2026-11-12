@@ -13,12 +13,8 @@ namespace namparametric::dsp {
 
 enum class ModelSize { Full, Lite };
 enum class OutputMode { Raw, Normalized, Calibrated, Auto };
-enum class ControlTransition { Eco, Crossfade };
-
-// Experiment-only Eco controls; choice indices match the plugin's settings.
-enum class EcoTimingPreset { Ms20_40, Ms20_60, Ms20_20, Ms30_30, Ms40_40, Ms50_50, Ms75_75, Ms100_100 };
-enum class EcoInterpolationCurve { Smoothstep, Smootherstep, Linear, Septic };
-
+// HyperWaveNet uses one network with fixed 100 ms updates and
+// per-sample linear coefficient interpolation over 100 ms.
 struct ModelParameterInfo {
   std::string name;
   float minValue = 0.0f;
@@ -58,50 +54,20 @@ class NamModelEngine {
   [[nodiscard]] const std::vector<ModelParameterInfo>& GetParameterInfos() const;
   [[nodiscard]] const std::vector<float>& GetParameterValues() const;
   bool SetParameterValues(std::span<const float> values) noexcept;
-  void SetControlTransition(ControlTransition mode) noexcept { mRequestedTransition = mode; }
-  // Call from the audio thread; pending choices take effect between ramps.
-  void SetEcoTweakSettings(int timingPreset, int curve) noexcept;
-
+ 
  private:
   struct ResamplerState;
   [[nodiscard]] double GetModelSampleRateForProcessing() const;
   [[nodiscard]] bool NeedToResample() const;
   void ProcessModel(float* input, float* output, int numSamples);
-  void ProcessModelInternal(float* input, float* output, int numSamples);
-  void ProcessEco(float* input, float* output, int numSamples);
-  void ApplyPendingEcoTweakSettings() noexcept;
-  [[nodiscard]] int EcoRampFrames() const noexcept;
-  [[nodiscard]] int EcoIntervalFrames() const noexcept;
-
   pnam::OutputGainCurve mOutputGain;
   std::vector<float> mControlValues, mGainNeuralValues;
   double mGainTarget=1, mGainCurrent=1, mGainAlpha=1;
   void ApplyOutputGain(float* output,int samples) noexcept;
   std::unique_ptr<nam::DSP> mModel;
-  // Both histories keep receiving the same audio. Only the inaudible network
-  // receives new weights; a sample-continuous fade then exchanges their roles.
-  std::unique_ptr<nam::DSP> mTransitionModel;
-  nam::IParametricControl* mTransitionControl = nullptr;
-  std::vector<float> mTransitionOutput, mRenderedValues;
-  int mFadePosition = 0;
-  int mFadeLength = 0;
-  bool mFading = false;
-  ControlTransition mRequestedTransition = ControlTransition::Crossfade;
-  ControlTransition mActiveTransition = ControlTransition::Crossfade;
-  int mStandbyWarmup = 0;
-  // Eco-only, model-sample clock: recondition no faster than the selected
-  // interval; requested controls are retained until the next eligible block.
-  // Crossfade and the independent Linear Volume gain stage do not use this.
-  int mEcoIntervalSamples = 1, mEcoCooldownRemaining = 0;
-  int mEcoTimingPreset = 0, mEcoCurve = 0;
-  int mAppliedEcoTimingPreset = -1, mAppliedEcoCurve = -1;
-  int mCorrectionLength = 0, mCorrectionPosition = 0;
-  int mRawHistory = 0, mPredictionSkip = 0;
-  float mCorrectionStart = 0.0f, mLastRaw = 0.0f, mPreviousRaw = 0.0f;
-  float mPredictionError = 0.0f, mRawPeak = 0.0f;
-  float mErrorDecay = 0.0f, mPeakDecay = 0.0f;
-  float mLastOutput = 0.0f, mPreviousOutput = 0.0f;
-  int mOutputHistory = 0;
+  // Only one NAM DSP network. No standby DSP, crossfade or output-step predictor.
+  std::vector<float> mRenderedValues;
+  int mUpdateIntervalSamples = 1, mUpdateCooldownRemaining = 0;
   std::shared_ptr<const nlohmann::json> mExportSource;
   bool mSupportsSizeSelection = false;
   ModelSize mModelSize = ModelSize::Full;
