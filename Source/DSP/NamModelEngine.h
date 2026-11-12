@@ -24,7 +24,8 @@ struct ModelParameterInfo {
   float minValue = 0.0f;
   float maxValue = 0.0f;
   float defaultValue = 0.0f;
-  std::vector<std::string> enumNames;
+  std::vector<std::string> enumNames; // index_sw display order
+  std::vector<int> enumValues; // display position -> original neural switch value
   // GUI order only; original positional neural indices must never change.
   size_t displayIndex = 0;
 

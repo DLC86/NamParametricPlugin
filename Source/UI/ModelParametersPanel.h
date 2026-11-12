@@ -28,6 +28,7 @@ class ModelParametersPanel final : public juce::Component {
  private:
   struct ParamControl {
     bool isSwitch = false;
+    std::vector<int> enumValues;
     std::unique_ptr<juce::Label> nameLabel;
     std::unique_ptr<juce::Slider> knob;
     std::unique_ptr<juce::Label> valueLabel;

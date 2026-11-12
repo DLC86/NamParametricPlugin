@@ -1,4 +1,5 @@
 #include "ModelParametersPanel.h"
+#include <numeric>
 
 #include <algorithm>
 #include <cmath>
@@ -84,14 +85,23 @@ void ModelParametersPanel::RebuildControls(const std::vector<RuntimeParameterInf
         options.add(name);
       }
 
+      control.enumValues = param.enumValues;
+      if (control.enumValues.empty()) {
+        control.enumValues.resize(param.enumNames.size());
+        std::iota(control.enumValues.begin(), control.enumValues.end(), 0);
+      }
+      const auto it = std::find(control.enumValues.begin(), control.enumValues.end(),
+                                static_cast<int>(std::round(initialValue)));
+      const int initialDisplay = it == control.enumValues.end() ? 0 :
+          static_cast<int>(std::distance(control.enumValues.begin(),it));
       control.switchControl = std::make_unique<SegmentedSwitch>();
       control.switchControl->setOptions(options);
-      control.switchControl->setSelectedIndex(static_cast<int>(std::round(initialValue)),
-                                              juce::dontSendNotification);
-
-      control.switchControl->onChange = [this, index](int selectedIndex) {
-        if (onValueChanged != nullptr) {
-          onValueChanged(index, static_cast<double>(selectedIndex));
+      control.switchControl->setSelectedIndex(initialDisplay, juce::dontSendNotification);
+      const auto values = control.enumValues;
+      control.switchControl->onChange = [this, index, values](int selectedIndex) {
+        if (onValueChanged != nullptr && selectedIndex >= 0 &&
+            static_cast<size_t>(selectedIndex) < values.size()) {
+          onValueChanged(index, static_cast<double>(values[static_cast<size_t>(selectedIndex)]));
         }
       };
 
@@ -146,8 +156,12 @@ void ModelParametersPanel::SetValue(const size_t index, const double value) {
 
   auto& control = mControls[index];
   if (control.isSwitch && control.switchControl != nullptr) {
-    control.switchControl->setSelectedIndex(static_cast<int>(std::round(value)),
-                                            juce::dontSendNotification);
+    const auto it=std::find(control.enumValues.begin(),control.enumValues.end(),
+                            static_cast<int>(std::round(value)));
+    if(it!=control.enumValues.end())
+      control.switchControl->setSelectedIndex(
+          static_cast<int>(std::distance(control.enumValues.begin(),it)),
+          juce::dontSendNotification);
   } else if (control.knob != nullptr &&
              !juce::approximatelyEqual(control.knob->getValue(), value)) {
     control.knob->setValue(value, juce::dontSendNotification);
