@@ -21,7 +21,9 @@ jobs:
         run: |
           set -euo pipefail
           grep -Fx "project(NamParametricPlugin VERSION 0.5.1)" CMakeLists.txt
-          gh api "repos/$GH_REPO/releases/tags/v0.5.1" > /tmp/release.json
+          # Draft releases aren't returned by /releases/tags/: use the known
+          # existing draft ID and validate its tag, draft and prerelease flags.
+          gh api "repos/$GH_REPO/releases/441587605" > /tmp/release.json
           python3 - <<'PY'
           import json
           release=json.load(open('/tmp/release.json'))
@@ -184,3 +186,20 @@ jobs:
               print(asset['name'], asset['size'])
           print('Success: seven verified packages, draft unchanged')
           PY
+
+  cleanup-branches:
+    needs: verify-draft
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete superseded smoothing experiments after release verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          for branch in experiment/direct-kernel-weight-smoothing experiment/offline-sample-weight-smoothing; do
+            if gh api "repos/$GH_REPO/git/ref/heads/$branch" >/dev/null 2>&1; then
+              gh api -X DELETE "repos/$GH_REPO/git/refs/heads/$branch"
+              echo "Removed $branch after seven native assets were verified"
+            fi
+          done
