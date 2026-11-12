@@ -32,7 +32,9 @@ jobs:
           python3 - <<'PY'
           import json
           release=json.load(open('/tmp/release.json'))
-          assert release['tag_name']=='v0.5.1', 'Wrong release tag'
+          assert release['id']==441587605, 'Unexpected draft ID'
+          assert (release['tag_name']=='v0.5.1' or
+                  release['tag_name'].startswith('untagged-')), 'Unexpected draft tag'
           assert release['draft'], 'Refusing to update a published release'
           assert release['prerelease'], 'Refusing to clear draft prerelease status'
           print("Updating existing draft release",release['id'])
