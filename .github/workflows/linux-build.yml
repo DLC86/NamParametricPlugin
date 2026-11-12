@@ -22,6 +22,9 @@ jobs:
       GH_REPO: ${{ github.repository }}
       RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
+      - name: Use pinned Eigen GitHub mirror (GitLab outage workaround)
+        shell: bash
+        run: git config --global url."https://github.com/eigenteam/eigen-git-mirror.git".insteadOf "https://gitlab.com/libeigen/eigen"
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_ref }}

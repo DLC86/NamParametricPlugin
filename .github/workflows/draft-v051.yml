@@ -63,6 +63,9 @@ jobs:
     runs-on: macos-15-intel
 
     steps:
+      - name: Use pinned Eigen GitHub mirror (GitLab outage workaround)
+        shell: bash
+        run: git config --global url."https://github.com/eigenteam/eigen-git-mirror.git".insteadOf "https://gitlab.com/libeigen/eigen"
       - name: Checkout pinned source
         uses: actions/checkout@v4
         with:
@@ -116,6 +119,9 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      - name: Use pinned Eigen GitHub mirror (GitLab outage workaround)
+        shell: bash
+        run: git config --global url."https://github.com/eigenteam/eigen-git-mirror.git".insteadOf "https://gitlab.com/libeigen/eigen"
       - name: Checkout pinned source
         uses: actions/checkout@v4
         with:
