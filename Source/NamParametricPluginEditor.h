@@ -1,6 +1,8 @@
 #pragma once
 
 #include <juce_gui_extra/juce_gui_extra.h>
+#include <future>
+#include <optional>
 
 #include "NamParametricPluginProcessor.h"
 #include "UI/AboutOverlayComponent.h"
@@ -37,7 +39,14 @@ class NamParametricPluginAudioProcessorEditor final : public juce::AudioProcesso
   void ShowStaticExportChooser();
   void CollectStaticExport();
   void UpdateResizeLimits();
+  void UpdateVersionNotification();
   void timerCallback() override;
+
+  struct VersionNotice {
+    juce::String version;
+    juce::String releaseUrl;
+  };
+  static std::optional<VersionNotice> CheckLatestRelease();
 
   NamParametricPluginAudioProcessor& mProcessor;
   NamLookAndFeel mLookAndFeel;
@@ -47,7 +56,13 @@ class NamParametricPluginAudioProcessorEditor final : public juce::AudioProcesso
   IrBarComponent mIrBar;
   juce::TextButton mAboutButton{"i"};
   juce::TextButton mSettingsButton{"Settings"};
+  // Hidden until a newer published release is found; no startup popup.
+  juce::TextButton mUpdateLed{juce::String::fromUTF8("\xe2\x97\x8f")};
   AboutOverlayComponent mAboutOverlay;
+  std::optional<std::future<std::optional<VersionNotice>>> mVersionCheck;
+  std::optional<VersionNotice> mNewVersion;
+  int mUpdateCheckDelayTicks = 18; // Start ~1.5 s after the editor is opened
+  int mUpdateBlinkTicks = 0;
 
   std::unique_ptr<juce::FileChooser> mModelChooser;
   std::unique_ptr<juce::FileChooser> mIrChooser;

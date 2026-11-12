@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <array>
+#include <future>
+#include <optional>
 
 #include "UI/CalibrationSettingsComponent.h"
 #include "UI/NamColours.h"
@@ -18,7 +21,83 @@ constexpr int kMaxWidth = 1400;
 constexpr int kMaxHeight = 900;
 constexpr int kAboutButtonSize = 22;
 constexpr int kAboutButtonMargin = 14;
+constexpr int kUpdateLedSize = 21;
+constexpr auto kReleaseApi = "https://api.github.com/repos/DLC86/NamParametricPlugin/releases?per_page=20";
+
+std::optional<std::array<int, 3>> ParseReleaseVersion(juce::String value) {
+  value = value.trim();
+  if (value.startsWithIgnoreCase("v"))
+    value = value.substring(1);
+  const auto parts = juce::StringArray::fromTokens(value, ".", {});
+  if (parts.size() != 3) return std::nullopt;
+  std::array<int, 3> result{};
+  for (int i = 0; i < 3; ++i) {
+    if (parts[i].isEmpty() || !parts[i].containsOnly("0123456789") || parts[i].length() > 8)
+      return std::nullopt;
+    result[static_cast<size_t>(i)] = parts[i].getIntValue();
+  }
+  return result;
+}
 }  // namespace
+
+std::optional<NamParametricPluginAudioProcessorEditor::VersionNotice>
+NamParametricPluginAudioProcessorEditor::CheckLatestRelease() {
+  // This function runs ONLY on a background task, never on GUI or DSP threads.
+  auto current = ParseReleaseVersion(juce::String(ProjectInfo::versionString));
+  if (!current) return std::nullopt;
+  try {
+    const juce::URL url(kReleaseApi);
+    auto options = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
+                       .withConnectionTimeoutMs(3500)
+                       .withExtraHeaders("User-Agent: NAM-Parametric-Plugin/" +
+                                         juce::String(ProjectInfo::versionString) +
+                                         "\r\nAccept: application/vnd.github+json\r\n");
+    auto stream = url.createInputStream(options);
+    if (!stream) return std::nullopt;
+    const auto json = juce::JSON::parse(stream->readEntireStreamAsString());
+    if (!json.isArray()) return std::nullopt;
+    std::optional<std::array<int, 3>> latest = current;
+    juce::String versionText;
+    for (const auto& item : *json.getArray()) {
+      if (static_cast<bool>(item.getProperty("draft", true))) continue;
+      const auto tag = item.getProperty("tag_name", {}).toString();
+      auto parsed = ParseReleaseVersion(tag);
+      if (parsed && *parsed > *latest) {
+        latest = parsed;
+        versionText = tag.startsWithIgnoreCase("v") ? tag.substring(1) : tag;
+      }
+    }
+    if (versionText.isNotEmpty()) {
+      const juce::String uri = "https://github.com/DLC86/NamParametricPlugin/releases/tag/v" + versionText;
+      return VersionNotice{versionText, uri};
+    }
+  } catch (...) {
+    // Offline hosts, GitHub errors and malformed replies must be completely silent.
+  }
+  return std::nullopt;
+}
+
+void NamParametricPluginAudioProcessorEditor::UpdateVersionNotification() {
+  if (--mUpdateCheckDelayTicks == 0 && !mVersionCheck)
+    mVersionCheck.emplace(std::async(std::launch::async, &NamParametricPluginAudioProcessorEditor::CheckLatestRelease));
+
+  if (mVersionCheck &&
+      mVersionCheck->wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+    mNewVersion = mVersionCheck->get();
+    mVersionCheck.reset();
+    if (mNewVersion) {
+      mUpdateLed.setTooltip("NAM Parametric Plugin " + mNewVersion->version +
+                            " available — click to view the release");
+      mUpdateLed.setVisible(true);
+    }
+  }
+  if (mNewVersion && (++mUpdateBlinkTicks % 8 == 0)) {
+    const bool bright = ((mUpdateBlinkTicks / 8) % 2) != 0;
+    mUpdateLed.setColour(juce::TextButton::textColourOffId,
+                         bright ? juce::Colour(0xffef4444) : juce::Colour(0xff555555));
+    mUpdateLed.repaint();
+  }
+}
 
 bool NamParametricPluginAudioProcessorEditor::RuntimeParameterListsEqual(
     const std::vector<RuntimeParameterInfo>& lhs, const std::vector<RuntimeParameterInfo>& rhs) {
@@ -219,6 +298,15 @@ NamParametricPluginAudioProcessorEditor::NamParametricPluginAudioProcessorEditor
   mAboutButton.onClick = [this]() { mAboutOverlay.Show(); };
   addAndMakeVisible(mAboutButton);
   addAndMakeVisible(mSettingsButton);
+  mUpdateLed.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+  mUpdateLed.setColour(juce::TextButton::buttonOnColourId, juce::Colours::transparentBlack);
+  mUpdateLed.setColour(juce::TextButton::textColourOffId, juce::Colour(0xffef4444));
+  mUpdateLed.setTooltip("Check for newer NAM Parametric Plugin versions");
+  mUpdateLed.onClick = [this]() {
+    if (mNewVersion)
+      juce::URL(mNewVersion->releaseUrl).launchInDefaultBrowser();
+  };
+  addChildComponent(mUpdateLed); // Hidden until a newer published version exists.
   mSettingsButton.onClick = [this]() {
     juce::CallOutBox::launchAsynchronously(
         std::make_unique<CalibrationSettingsComponent>(mProcessor.mValueTree),
@@ -295,9 +383,12 @@ void NamParametricPluginAudioProcessorEditor::resized() {
                          kAboutButtonSize);
   mAboutOverlay.setBounds(getLocalBounds());
   mSettingsButton.setBounds(mAboutButton.getX() - 72, mAboutButton.getY(), 64, kAboutButtonSize);
+  mUpdateLed.setBounds(mSettingsButton.getX() - kUpdateLedSize - 8, mSettingsButton.getY(),
+                       kUpdateLedSize, kAboutButtonSize);
 }
 
 void NamParametricPluginAudioProcessorEditor::timerCallback() {
+  UpdateVersionNotification();
   CollectStaticExport();
   UpdateModelBarInfo();
   UpdateIrBarInfo();
