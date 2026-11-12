@@ -384,8 +384,11 @@ void NamParametricPluginAudioProcessorEditor::resized() {
                          kAboutButtonSize);
   mAboutOverlay.setBounds(getLocalBounds());
   mSettingsButton.setBounds(mAboutButton.getX() - 72, mAboutButton.getY(), 64, kAboutButtonSize);
-  mUpdateLed.setBounds(mSettingsButton.getX() - kUpdateLedSize - 8, mSettingsButton.getY(),
-                       kUpdateLedSize, kAboutButtonSize);
+  // Keep the update indicator immediately to the right of the centred brand title.
+  const auto titleFont = juce::Font(juce::FontOptions(32.0f, juce::Font::bold));
+  const int titleRight = (getWidth() + titleFont.getStringWidth("Parametric NAM")) / 2;
+  mUpdateLed.setBounds(titleRight + 4, (kTopBarHeight - kUpdateLedSize) / 2,
+                       kUpdateLedSize, kUpdateLedSize);
 }
 
 void NamParametricPluginAudioProcessorEditor::timerCallback() {

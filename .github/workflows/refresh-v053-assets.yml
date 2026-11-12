@@ -1,0 +1,248 @@
+name: Refresh 0.5.3 title LED release assets
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/refresh-v053-assets.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-v053-assets
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+      - run: choco install ninja -y
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Configure
+        run: cmake --preset windows-release -DNAM_PARAMETRIC_BUILD_TESTS=ON
+      - name: Build all release targets
+        run: cmake --build --preset windows-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_Standalone static_export_test hyper_a2_engine_test ir_normalization_test
+      - name: Verify audio, model compatibility, and IR gain
+        run: ctest --test-dir build/windows-release --output-on-failure -R "^(static_export|hyper_a2_engine|ir_normalization)$"
+      - name: Package exact 0.5.3 binaries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = 'build/windows-release/NamParametricPlugin_artefacts/Release'
+          $info = (Get-Item -LiteralPath "$root/Standalone/NAM Parametric Plugin.exe").VersionInfo
+          if ($info.FileVersion -ne '0.5.3' -or $info.ProductVersion -ne '0.5.3') { throw 'Binary version mismatch' }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "$root/Standalone/NAM Parametric Plugin.exe", "$root/Standalone/THIRD-PARTY-NOTICES.md", "$root/Standalone/CREDITS.md" -DestinationPath "dist/NAM-Parametric-Plugin-0.5.3-Windows-Standalone.zip"
+          Compress-Archive -Path "$root/VST3/NAM Parametric Plugin.vst3" -DestinationPath "dist/NAM-Parametric-Plugin-0.5.3-Windows-VST3.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: refresh-v053-windows
+          path: dist/*.zip
+          if-no-files-found: error
+
+  build-macos:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+      - name: Install Ninja
+        run: brew install ninja
+      - name: Configure
+        run: cmake --preset mac-release -DNAM_PARAMETRIC_BUILD_TESTS=ON
+      - name: Build all release targets
+        run: cmake --build --preset mac-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_AU NamParametricPlugin_Standalone static_export_test hyper_a2_engine_test ir_normalization_test
+      - name: Verify audio, model compatibility, and IR gain
+        run: ctest --test-dir build/mac-release --output-on-failure -R '^(static_export|hyper_a2_engine|ir_normalization)$'
+      - name: Verify universal bundles and package
+        run: |
+          set -euo pipefail
+          root=build/mac-release/NamParametricPlugin_artefacts/Release
+          mkdir -p dist
+          for entry in Standalone/app VST3/vst3 AU/component; do
+            format="$(echo "$entry" | cut -d/ -f1)"
+            extension="$(echo "$entry" | cut -d/ -f2)"
+            lipo "$root/$format/NAM Parametric Plugin.$extension/Contents/MacOS/NAM Parametric Plugin" -verify_arch arm64 x86_64
+          done
+          ditto -c -k --sequesterRsrc --keepParent "$root/Standalone/NAM Parametric Plugin.app" "dist/NAM-Parametric-Plugin-0.5.3-macOS-Standalone.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$root/VST3/NAM Parametric Plugin.vst3" "dist/NAM-Parametric-Plugin-0.5.3-macOS-VST3.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$root/AU/NAM Parametric Plugin.component" "dist/NAM-Parametric-Plugin-0.5.3-macOS-AU.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: refresh-v053-macos
+          path: dist/*.zip
+          if-no-files-found: error
+
+  build-linux:
+    permissions:
+      contents: write
+    uses: ./.github/workflows/linux-build.yml
+    with:
+      source_ref: ${{ github.sha }}
+      release_tag: ''
+      upload_release: false
+
+  replace-assets:
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: ${{ github.sha }}
+    steps:
+      - name: Download Windows packages
+        uses: actions/download-artifact@v4
+        with:
+          name: refresh-v053-windows
+          path: dist
+      - name: Download macOS packages
+        uses: actions/download-artifact@v4
+        with:
+          name: refresh-v053-macos
+          path: dist
+      - name: Download Linux packages
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-artifacts
+          path: dist
+      - name: Stage, validate and atomically swap each release asset
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import tarfile
+          import urllib.parse
+          import urllib.request
+          import zipfile
+          from pathlib import Path
+
+          repo = os.environ['GH_REPO']
+          token = os.environ['GH_TOKEN']
+          source_sha = os.environ['SOURCE_SHA']
+          base = 'https://api.github.com/repos/' + repo
+          tag = 'v0.5.3'
+          original_commit = '8be9143e33eb0c7fdba5570e3e4db91bd78a594f'
+          prefix = 'NAM-Parametric-Plugin-0.5.3-'
+          suffixes = (
+              'Windows-Standalone.zip', 'Windows-VST3.zip',
+              'macOS-Standalone.zip', 'macOS-VST3.zip', 'macOS-AU.zip',
+              'Linux-x86_64-Standalone.tar.gz', 'Linux-x86_64-VST3.tar.gz',
+          )
+          expected = {prefix + suffix for suffix in suffixes}
+          files = {p.name: p for p in Path('dist').iterdir()
+                   if p.name.endswith(('.zip', '.tar.gz'))}
+          assert set(files) == expected, ('Package mismatch', set(files) ^ expected)
+          hashes = {}
+          for name, package in sorted(files.items()):
+              assert package.stat().st_size > 100_000, name
+              if name.endswith('.zip'):
+                  with zipfile.ZipFile(package) as archive:
+                      assert archive.namelist() and archive.testzip() is None, name
+              else:
+                  with tarfile.open(package, 'r:gz') as archive:
+                      assert archive.getmembers(), name
+              hashes[name] = hashlib.sha256(package.read_bytes()).hexdigest()
+              print('Verified:', name, package.stat().st_size, hashes[name], flush=True)
+
+          headers = {
+              'Authorization': 'Bearer ' + token,
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+          }
+          def api(method, url, body=None, content_type=None):
+              payload = None if body is None else (
+                  body if isinstance(body, bytes) else json.dumps(body).encode())
+              h = dict(headers)
+              if payload is not None:
+                  h['Content-Type'] = content_type or 'application/json'
+              request = urllib.request.Request(url, data=payload, method=method, headers=h)
+              with urllib.request.urlopen(request, timeout=240) as response:
+                  if response.status == 204:
+                      return None
+                  return json.load(response)
+
+          release_url = base + '/releases/tags/' + tag
+          release = api('GET', release_url)
+          assert not release['draft'] and not release['prerelease'], 'Expected published preview'
+          assert release['target_commitish'] == original_commit, 'Release provenance changed'
+          assert {a['name'] for a in release['assets']} == expected, 'Unexpected existing assets'
+          release_id = release['id']
+          originals = {a['name']: a for a in release['assets']}
+
+          # Upload under temporary names so all seven original downloads stay intact
+          # if a build or an upload fails. Verify each upload before modifying originals.
+          staged = {}
+          for name, package in sorted(files.items()):
+              staged_name = name + '.staged-' + source_sha[:12]
+              url = ('https://uploads.github.com/repos/' + repo +
+                     '/releases/' + str(release_id) + '/assets?name=' +
+                     urllib.parse.quote(staged_name))
+              uploaded = api('POST', url, package.read_bytes(), 'application/octet-stream')
+              assert uploaded['name'] == staged_name
+              assert uploaded['state'] == 'uploaded'
+              assert uploaded['size'] == package.stat().st_size
+              if uploaded.get('digest'):
+                  assert uploaded['digest'] == 'sha256:' + hashes[name]
+              staged[name] = uploaded
+              print('Staged:', staged_name, flush=True)
+
+          def rename(asset, name):
+              return api('PATCH', base + '/releases/assets/' + str(asset['id']),
+                         {'name': name})
+          def remove(asset):
+              api('DELETE', base + '/releases/assets/' + str(asset['id']))
+
+          # Each swap keeps a reversible original until its replacement is named.
+          for name in sorted(expected):
+              old = originals[name]
+              backup_name = name + '.backup-' + source_sha[:12]
+              rename(old, backup_name)
+              try:
+                  rename(staged[name], name)
+              except Exception:
+                  rename(old, name)
+                  raise
+              remove(old)
+              print('Replaced:', name, flush=True)
+
+          verified = api('GET', release_url)
+          assert {a['name'] for a in verified['assets']} == expected
+          for asset in verified['assets']:
+              name = asset['name']
+              assert asset['state'] == 'uploaded'
+              assert asset['size'] == files[name].stat().st_size
+              if asset.get('digest'):
+                  assert asset['digest'] == 'sha256:' + hashes[name]
+
+          marker = '<!-- v053-title-led-asset-refresh -->'
+          section = (
+              '\n\n' + marker + '\n'
+              '### Updated builds — 12 November 2026\n\n'
+              'The seven downloadable packages have been rebuilt and verified '
+              'after moving the new-version notification LED beside the large '
+              '**Parametric NAM** title. Update checking, blinking and the '
+              'release-link click action are unchanged.\n\n'
+              'The updated binaries come from '
+              '[commit ' + source_sha[:12] + '](https://github.com/' + repo +
+              '/commit/' + source_sha + '). The original Git tag '
+              'and auto-generated source archives remain unchanged.\n\n'
+              '**SHA-256 of refreshed packages:**\n\n' +
+              ''.join('- ' + chr(96) + name + chr(96) + ': ' + chr(96) +
+                      hashes[name] + chr(96) + '\n'
+                      for name in sorted(expected))
+          )
+          body = verified['body'] or ''
+          assert marker not in body, 'This refresh was already applied'
+          api('PATCH', base + '/releases/' + str(release_id),
+              {'body': body + section})
+          print('SUCCESS: all seven packages replaced and release notes updated')
+          PY
