@@ -141,17 +141,12 @@ int main(int argc, const char* const* argv) {
     auto normalized = expected.at("full")[0].get<std::vector<float>>();
     for (auto& value : normalized) value *= static_cast<float>(std::pow(10.0, 6.0 / 20));
     RenderAndCompare(calibrated, input, normalized);
-    Check(calibrated.mValueTree.getRawParameterValue("controlTransition")->load() == 0.0f,
-          "Eco must be the initial control smoothing mode");
-    calibrated.mValueTree.getParameter("controlTransition")->setValueNotifyingHost(1.0f);
     calibrated.getStateInformation(state);
     NamParametricPluginAudioProcessor calibratedRestored;
     calibratedRestored.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
     Check(calibratedRestored.mValueTree.getRawParameterValue("calibrateInput")->load() == 0.0f &&
               calibratedRestored.mValueTree.getRawParameterValue("outputMode")->load() == 1.0f,
           "Calibration settings were lost from the session");
-    Check(calibratedRestored.mValueTree.getRawParameterValue("controlTransition")->load() == 1.0f,
-          "Control smoothing mode was lost from the session");
     // Render the actual components for layout inspection without opening windows.
     std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
     const auto savePreview = [&](juce::Component& component, const char* name) {

@@ -154,9 +154,6 @@ NamParametricPluginAudioProcessor::NamParametricPluginAudioProcessor()
   mCalibrateInputParam = mValueTree.getRawParameterValue(ParamIDs::calibrateInput);
   mInputCalibrationParam = mValueTree.getRawParameterValue(ParamIDs::inputCalibration);
   mOutputModeParam = mValueTree.getRawParameterValue(ParamIDs::outputMode);
-  mControlTransitionParam = mValueTree.getRawParameterValue(ParamIDs::controlTransition);
-  mEcoTimingPresetParam = mValueTree.getRawParameterValue(ParamIDs::ecoTimingPreset);
-  mEcoInterpolationCurveParam = mValueTree.getRawParameterValue(ParamIDs::ecoInterpolationCurve);
   startTimerHz(30);
 }
 
@@ -215,15 +212,6 @@ void NamParametricPluginAudioProcessor::processBlock(juce::AudioBuffer<float>& b
 
   TryPromoteStagedModel();
   TryPromoteStagedIr();
-  if (mActiveProcessingState != nullptr) {
-    auto& engine = *mActiveProcessingState->model;
-    engine.SetControlTransition(
-        mControlTransitionParam->load() >= 0.5f ? namparametric::dsp::ControlTransition::Crossfade
-                                                : namparametric::dsp::ControlTransition::Eco);
-    engine.SetEcoTweakSettings(
-        static_cast<int>(mEcoTimingPresetParam->load()),
-        static_cast<int>(mEcoInterpolationCurveParam->load()));
-  }
   ApplyPendingRuntimeParameterChanges();
 
   float inputGainDb = mInputGainParam != nullptr ? mInputGainParam->load() : 0.0f;
@@ -308,20 +296,6 @@ NamParametricPluginAudioProcessor::CreateParameterLayout() {
   params.push_back(std::make_unique<juce::AudioParameterChoice>(
       juce::ParameterID(ParamIDs::outputMode, 1), "Output Mode",
       juce::StringArray{"Raw", "Normalized", "Calibrated", "Auto"}, 3));
-  params.push_back(std::make_unique<juce::AudioParameterChoice>(
-      juce::ParameterID(ParamIDs::controlTransition, 1), "Control smoothing",
-      juce::StringArray{"Eco de-click", "Crossfade"}, 0));
-  // Temporary experiment controls, appended without changing existing parameter IDs.
-  params.push_back(std::make_unique<juce::AudioParameterChoice>(
-      juce::ParameterID(ParamIDs::ecoTimingPreset, 1), "Eco update / ramp (test)",
-      juce::StringArray{"20 / 40 ms (default)", "20 / 60 ms", "20 / 20 ms",
-                        "30 / 30 ms", "40 / 40 ms", "50 / 50 ms",
-                        "75 / 75 ms", "100 / 100 ms"}, 0));
-  params.push_back(std::make_unique<juce::AudioParameterChoice>(
-      juce::ParameterID(ParamIDs::ecoInterpolationCurve, 1), "Eco weight curve (test)",
-      juce::StringArray{"Smoothstep (cubic)", "Smootherstep (quintic)",
-                        "Linear", "Septic (C3)"}, 0));
-
   return {params.begin(), params.end()};
 }
 
@@ -384,9 +358,6 @@ void NamParametricPluginAudioProcessor::StartModelLoad(
   mRequestedRestoredValues = restoredValues;
   LoadRequest request{modelFile, std::move(restoredValues), ++mLatestLoadRequestId, mModelSize,
                       preserveRuntimeParameters};
-  request.transition = mControlTransitionParam->load() >= 0.5f
-                           ? namparametric::dsp::ControlTransition::Crossfade
-                           : namparametric::dsp::ControlTransition::Eco;
   if (mLoadFuture.has_value()) {
     mQueuedLoadRequest = std::move(request);
     mStatusText = "Queued model: " + modelFile.getFileName();
@@ -410,7 +381,6 @@ void NamParametricPluginAudioProcessor::BeginModelLoadLocked(LoadRequest request
     result.preserveRuntimeParameters = loadRequest.preserveRuntimeParameters;
     result.restoredValues = std::move(loadRequest.restoredValues);
     auto model = std::make_unique<namparametric::dsp::NamModelEngine>();
-    model->SetControlTransition(loadRequest.transition);
 
     std::string error;
     if (!model->LoadModel(modelPath, error, loadRequest.size)) {
@@ -940,16 +910,12 @@ void NamParametricPluginAudioProcessor::setStateInformation(const void* data,
     return;
   }
 
-  // Existing sessions predate these experimental choices. Explicitly restore
-  // their defaults even when replacing state in an already-running processor.
-  for (const char* choiceId : {ParamIDs::controlTransition, ParamIDs::ecoTimingPreset,
-                                ParamIDs::ecoInterpolationCurve}) {
-    if (!tree.getChildWithProperty("id", choiceId).isValid()) {
-      juce::ValueTree parameter("PARAM");
-      parameter.setProperty("id", choiceId, nullptr);
-      parameter.setProperty("value", 0.0f, nullptr);
-      tree.appendChild(parameter, nullptr);
-    }
+  // Remove obsolete experimental choices from old sessions. All sessions now
+  // use the same fixed 100/100 ms linear weight smoothing, regardless of
+  // their previous Control smoothing setting.
+  for (const char* oldId : {"controlTransition", "ecoTimingPreset", "ecoInterpolationCurve"}) {
+    auto oldParameter = tree.getChildWithProperty("id", oldId);
+    if (oldParameter.isValid()) tree.removeChild(oldParameter, nullptr);
   }
   mValueTree.replaceState(tree);
   {
