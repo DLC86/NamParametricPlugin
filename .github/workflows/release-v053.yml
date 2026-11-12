@@ -1,0 +1,327 @@
+name: Release 0.5.3 — verified native packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v053.yml'
+
+permissions:
+  contents: write
+concurrency:
+  group: release-v053-native
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create draft for verified native packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag=v0.5.3
+          grep -Fx 'project(NamParametricPlugin VERSION 0.5.3)' CMakeLists.txt
+          test -s docs/release-0.5.3.md
+          if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/tmp/version-tag.json 2>/dev/null; then
+            python3 - <<'PY'
+          import json,os
+          tag=json.load(open('/tmp/version-tag.json'))
+          assert tag['object']['sha']==os.environ['GITHUB_SHA'], 'Existing tag belongs to another commit'
+          PY
+          else
+            gh api -X POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+          if gh release view "$tag" --json isDraft,tagName >/tmp/version-release.json 2>/dev/null; then
+            python3 - <<'PY'
+          import json
+          release=json.load(open('/tmp/version-release.json'))
+          assert release['isDraft'] and release['tagName']=='v0.5.3', 'Existing release must be a matching draft'
+          PY
+          else
+            gh release create "$tag" --verify-tag --draft --prerelease --latest=false \
+              --target "$GITHUB_SHA" --title 'NAM Parametric Plugin 0.5.3' \
+              --notes-file docs/release-0.5.3.md
+          fi
+  build-macos:
+    needs: prepare
+    runs-on: macos-15-intel
+
+    steps:
+      - name: Route pinned Eigen checkout through GitHub
+        shell: bash
+        run: git config --global url."https://github.com/eigenteam/eigen-git-mirror.git".insteadOf "https://gitlab.com/libeigen/eigen"
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Configure
+        run: cmake --preset mac-release -DNAM_PARAMETRIC_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build --preset mac-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_AU NamParametricPlugin_Standalone static_export_test hyper_a2_engine_test ir_normalization_test
+
+      - name: Verify audio, calibration and control smoothing
+        run: ctest --test-dir build/mac-release --output-on-failure -R '^(static_export|hyper_a2_engine|ir_normalization)
+
+      - name: Package artifacts
+        run: |
+          set -euo pipefail
+          ARTEFACT_DIR="build/mac-release/NamParametricPlugin_artefacts/Release"
+          VERSION="0.5.3"
+          mkdir -p dist
+          for entry in Standalone/app VST3/vst3 AU/component; do
+            format="${entry%/*}"
+            extension="${entry#*/}"
+            lipo "${ARTEFACT_DIR}/$format/NAM Parametric Plugin.$extension/Contents/MacOS/NAM Parametric Plugin" -verify_arch arm64 x86_64
+          done
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${ARTEFACT_DIR}/Standalone/NAM Parametric Plugin.app" \
+            "dist/NAM-Parametric-Plugin-${VERSION}-macOS-Standalone.zip"
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${ARTEFACT_DIR}/VST3/NAM Parametric Plugin.vst3" \
+            "dist/NAM-Parametric-Plugin-${VERSION}-macOS-VST3.zip"
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${ARTEFACT_DIR}/AU/NAM Parametric Plugin.component" \
+            "dist/NAM-Parametric-Plugin-${VERSION}-macOS-AU.zip"
+
+      - name: Upload tested packages directly to draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload v0.5.3 dist/*.zip --clobber
+
+  build-windows:
+    needs: prepare
+    runs-on: windows-latest
+
+    steps:
+      - name: Route pinned Eigen checkout through GitHub
+        shell: bash
+        run: git config --global url."https://github.com/eigenteam/eigen-git-mirror.git".insteadOf "https://gitlab.com/libeigen/eigen"
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Ninja
+        run: choco install ninja -y
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        run: cmake --preset windows-release -DNAM_PARAMETRIC_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build --preset windows-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_Standalone static_export_test hyper_a2_engine_test ir_normalization_test
+
+      - name: Verify audio, calibration and control smoothing
+        run: ctest --test-dir build/windows-release --output-on-failure -R '^(static_export|hyper_a2_engine|ir_normalization)$'
+
+      - name: Package artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $artefactDir = "build/windows-release/NamParametricPlugin_artefacts/Release"
+          $version = "0.5.3"
+          $info = (Get-Item -LiteralPath "$artefactDir/Standalone/NAM Parametric Plugin.exe").VersionInfo
+          if ($info.FileVersion -ne $version -or $info.ProductVersion -ne $version) { throw 'Binary version mismatch' }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          Compress-Archive -Path "$artefactDir/Standalone/NAM Parametric Plugin.exe", "$artefactDir/Standalone/THIRD-PARTY-NOTICES.md", "$artefactDir/Standalone/CREDITS.md" `
+            -DestinationPath "dist/NAM-Parametric-Plugin-$version-Windows-Standalone.zip"
+
+          Compress-Archive -Path "$artefactDir/VST3/NAM Parametric Plugin.vst3" `
+            -DestinationPath "dist/NAM-Parametric-Plugin-$version-Windows-VST3.zip"
+
+      - name: Upload tested packages directly to draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: gh release upload v0.5.3 dist/*.zip --clobber
+
+  build-linux:
+    needs: prepare
+    uses: ./.github/workflows/linux-build.yml
+    with:
+      source_ref: ${{ github.sha }}
+      release_tag: v0.5.3
+      upload_release: true
+
+  publish-release:
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish only after all seven native packages pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          tag = 'v0.5.3'
+          pages = json.loads(subprocess.check_output(['gh', 'api', f'repos/{os.environ["GH_REPO"]}/releases', '--paginate', '--slurp']))
+          matches = [r for page in pages for r in page if r['tag_name'] == tag]
+          assert len(matches) == 1
+          release = matches[0]
+          assert release['draft'] and release['target_commitish'] == os.environ['GITHUB_SHA']
+          prefix = f'NAM-Parametric-Plugin-{tag[1:]}-'
+          expected = {prefix + suffix for suffix in (
+              'Windows-Standalone.zip', 'Windows-VST3.zip',
+              'macOS-Standalone.zip', 'macOS-VST3.zip', 'macOS-AU.zip',
+              'Linux-x86_64-Standalone.tar.gz', 'Linux-x86_64-VST3.tar.gz')}
+          assert {a['name'] for a in release['assets']} == expected
+          assert all(a['state'] == 'uploaded' and a['size'] > 0 for a in release['assets'])
+          subprocess.run(['gh', 'release', 'edit', tag, '--draft=false', '--prerelease=false', '--latest'], check=True)
+          PY
+
+      - name: Verify macOS Standalone microphone permission and unchanged feedback mute
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="build/mac-release/NamParametricPlugin_artefacts/Release/Standalone/NAM Parametric Plugin.app"
+          plist="$app/Contents/Info.plist"
+          test -f "$plist"
+          usage=$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$plist")
+          test -n "$usage"
+          echo "Standalone permission: $usage"
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")
+          test "$version" = '0.5.3'
+          grep -F 'shouldMuteInput = ! isInterAppAudioConnected();' \
+            external/JUCE/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
+          grep -F 'Audio input is muted to avoid feedback loop' \
+            external/JUCE/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
+          echo "PASS: microphone entitlement description is packaged; JUCE default mute and notification remain unchanged."
+
+      - name: Package artifacts
+        run: |
+          set -euo pipefail
+          ARTEFACT_DIR="build/mac-release/NamParametricPlugin_artefacts/Release"
+          VERSION="0.5.3"
+          mkdir -p dist
+          for entry in Standalone/app VST3/vst3 AU/component; do
+            format="${entry%/*}"
+            extension="${entry#*/}"
+            lipo "${ARTEFACT_DIR}/$format/NAM Parametric Plugin.$extension/Contents/MacOS/NAM Parametric Plugin" -verify_arch arm64 x86_64
+          done
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${ARTEFACT_DIR}/Standalone/NAM Parametric Plugin.app" \
+            "dist/NAM-Parametric-Plugin-${VERSION}-macOS-Standalone.zip"
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${ARTEFACT_DIR}/VST3/NAM Parametric Plugin.vst3" \
+            "dist/NAM-Parametric-Plugin-${VERSION}-macOS-VST3.zip"
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${ARTEFACT_DIR}/AU/NAM Parametric Plugin.component" \
+            "dist/NAM-Parametric-Plugin-${VERSION}-macOS-AU.zip"
+
+      - name: Upload tested packages directly to draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload v0.5.3 dist/*.zip --clobber
+
+  build-windows:
+    needs: prepare
+    runs-on: windows-latest
+
+    steps:
+      - name: Route pinned Eigen checkout through GitHub
+        shell: bash
+        run: git config --global url."https://github.com/eigenteam/eigen-git-mirror.git".insteadOf "https://gitlab.com/libeigen/eigen"
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Ninja
+        run: choco install ninja -y
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        run: cmake --preset windows-release -DNAM_PARAMETRIC_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build --preset windows-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_Standalone static_export_test hyper_a2_engine_test ir_normalization_test
+
+      - name: Verify audio, calibration and control smoothing
+        run: ctest --test-dir build/windows-release --output-on-failure -R '^(static_export|hyper_a2_engine|ir_normalization)$'
+
+      - name: Package artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $artefactDir = "build/windows-release/NamParametricPlugin_artefacts/Release"
+          $version = "0.5.3"
+          $info = (Get-Item -LiteralPath "$artefactDir/Standalone/NAM Parametric Plugin.exe").VersionInfo
+          if ($info.FileVersion -ne $version -or $info.ProductVersion -ne $version) { throw 'Binary version mismatch' }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          Compress-Archive -Path "$artefactDir/Standalone/NAM Parametric Plugin.exe", "$artefactDir/Standalone/THIRD-PARTY-NOTICES.md", "$artefactDir/Standalone/CREDITS.md" `
+            -DestinationPath "dist/NAM-Parametric-Plugin-$version-Windows-Standalone.zip"
+
+          Compress-Archive -Path "$artefactDir/VST3/NAM Parametric Plugin.vst3" `
+            -DestinationPath "dist/NAM-Parametric-Plugin-$version-Windows-VST3.zip"
+
+      - name: Upload tested packages directly to draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: gh release upload v0.5.3 dist/*.zip --clobber
+
+  build-linux:
+    needs: prepare
+    uses: ./.github/workflows/linux-build.yml
+    with:
+      source_ref: ${{ github.sha }}
+      release_tag: v0.5.3
+      upload_release: true
+
+  publish-release:
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish only after all seven native packages pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          tag = 'v0.5.3'
+          pages = json.loads(subprocess.check_output(['gh', 'api', f'repos/{os.environ["GH_REPO"]}/releases', '--paginate', '--slurp']))
+          matches = [r for page in pages for r in page if r['tag_name'] == tag]
+          assert len(matches) == 1
+          release = matches[0]
+          assert release['draft'] and release['target_commitish'] == os.environ['GITHUB_SHA']
+          prefix = f'NAM-Parametric-Plugin-{tag[1:]}-'
+          expected = {prefix + suffix for suffix in (
+              'Windows-Standalone.zip', 'Windows-VST3.zip',
+              'macOS-Standalone.zip', 'macOS-VST3.zip', 'macOS-AU.zip',
+              'Linux-x86_64-Standalone.tar.gz', 'Linux-x86_64-VST3.tar.gz')}
+          assert {a['name'] for a in release['assets']} == expected
+          assert all(a['state'] == 'uploaded' and a['size'] > 0 for a in release['assets'])
+          subprocess.run(['gh', 'release', 'edit', tag, '--draft=false', '--prerelease=false', '--latest'], check=True)
+          PY
