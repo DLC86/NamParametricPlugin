@@ -1,0 +1,49 @@
+name: Verify macOS Standalone input permission (0.5.3)
+
+on:
+  push:
+    branches: [fix/macos-standalone-input-v053]
+    paths:
+      - '.github/workflows/mac-standalone-v053-test.yml'
+      - 'CMakeLists.txt'
+      - 'README.md'
+      - 'docs/release-0.5.3.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mac-standalone:
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    steps:
+      - name: Use pinned Eigen GitHub mirror
+        shell: bash
+        run: git config --global url."https://github.com/eigenteam/eigen-git-mirror.git".insteadOf "https://gitlab.com/libeigen/eigen"
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Ninja
+        run: brew install ninja
+      - name: Configure
+        run: cmake --preset mac-release -DNAM_PARAMETRIC_BUILD_TESTS=ON
+      - name: Build macOS Standalone and native regression tests
+        run: cmake --build --preset mac-release --parallel 3 --target NamParametricPlugin_Standalone static_export_test hyper_a2_engine_test ir_normalization_test
+      - name: Verify bundled microphone consent description and preserved JUCE mute
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="build/mac-release/NamParametricPlugin_artefacts/Release/Standalone/NAM Parametric Plugin.app"
+          plist="$app/Contents/Info.plist"
+          test -f "$plist"
+          /usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$plist"
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")
+          test "$version" = 0.5.3
+          grep -F 'shouldMuteInput = ! isInterAppAudioConnected();' \
+            external/JUCE/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
+          grep -F 'Audio input is muted to avoid feedback loop' \
+            external/JUCE/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
+          echo 'PASS: macOS standalone has microphone permission key and unchanged mute notification'
+      - name: Run model/DSP tests
+        run: ctest --test-dir build/mac-release --output-on-failure -R '^(static_export|hyper_a2_engine|ir_normalization)$'
