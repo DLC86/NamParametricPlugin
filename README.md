@@ -1,29 +1,19 @@
 # NamParametricPlugin
 
-**Version 0.5.2 (development prototype, not released)** replaces Eco's output-side step predictor
-with **single-network weight interpolation** for HyperWaveNet / HyperA2.
-The hypernetwork generates target weights at most once every 20 ms, and
-the *same* WaveNet interpolates between active and target coefficients over
-40 ms, with one update per 0.5 ms of model audio. Rapid retargets start from
-the currently applied weights, without running a second audio model. The
-original Crossfade mode remains available for direct comparisons, with its
-two-network behavior unchanged. This approach trades some additional
-weight-copy CPU during knob movement for avoiding hard weight jumps.
-No model format change or retraining is required. Sound quality and resource
-costs depend on the model and host hardware; this draft is intended for
-testing, especially with zero digital input.
+**Version 0.5.1 (draft)** adopts a single-network **100 ms weight-update
+interval** and **100 ms linear per-sample smoothing** directly in the
+HyperWaveNet convolution kernels. The earlier two-network Crossfade, old
+output-step correction and the experimental Control smoothing / timing / curve
+selectors have been removed. The sound at stationary knob settings is
+unchanged; the new algorithm only interpolates intermediate weights during
+control changes. Linear Volume remains a separate post-model gain stage.
 
-**Version 0.5.1 (draft)** adds a model-sample-time rate limiter to the
-default **Eco de-click** mode: neural weights are reconditioned at most once
-every **20 ms**. Rapid knob and switch automation is coalesced to the latest
-complete value vector, with the first change applied immediately and the
-original 5 ms de-click tail preserved. Linear Volume still uses its separate
-sample-smoothed DSP stage (no hypernetwork reconditioning), while the
-two-network Crossfade mode is unchanged. This stabilizes the frequency of
-CPU spikes during rapid automation; it does not move the individual weight
-calculation off the audio thread. The rate limit introduces up to about
-20 ms of additional control response during sustained movement, quantized
-to model processing block boundaries, but no audio latency.
+**Switch metadata** now supports the new `config.params[].options` format:
+each option has `name`, original neural `value`, and visual `index_sw`.
+Switch labels follow `index_sw` but underlying one-hot values, session values,
+static exports and model weights retain their original meaning. Legacy
+`enum_names` models remain supported. The separate control `index` still
+orders knobs/switches/Linear Volume in the UI.
 
 **Version 0.5.0** adds support for new
 `ParametricSlimmableContainer` models (while still loading older `HyperA2`
@@ -157,10 +147,11 @@ To use a model, download a `.nam` file and load it in the plugin (see [Usage Not
   parametric `.nam` files still load; the content and metadata format are the same.
   **Export NAM...** continues to produce a static **`.nam`**.
 - Dynamic model parameters are generated in the plugin UI and applied at runtime.
-- **Control smoothing** in Settings defaults to experimental **Eco de-click** in 0.4.1:
-  one running network and a 5 ms correction of output steps when controls change.
-  **Crossfade** retains the 0.4.0 behavior (two running networks, approximately
-  twice the model DSP CPU) for listening comparisons. The session recalls the choice.
+- **Fixed control smoothing:** HyperWaveNet weights update no faster than
+  once per 100 ms of model time, with a 100 ms **linear per-sample interpolation
+  inside convolution kernels** on a single audio network. No crossfade or
+  settings selector remains. Legacy sessions ignore obsolete smoothing choices.
+  Linear Volume remains independent.
 - **Export NAM...** freezes HyperWaveNet controls into a static WaveNet, or HyperA2
   controls into one static file containing **both Lite and Full**. The suggested
   filename includes the settings; custom metadata records every control name and

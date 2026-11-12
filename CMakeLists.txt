@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(NamParametricPlugin VERSION 0.5.2)
+project(NamParametricPlugin VERSION 0.5.1)
 
 include(CTest)
 
@@ -75,8 +75,8 @@ if(NOT PNAM_PATCH_ALREADY_APPLIED EQUAL 0)
 endif()
 endif() # first-stage pinned core weight-smoothing patch
 
-# Experiment only: install the second-stage kernel interpolation on top of
-# the pinned core. This is idempotent across repeated CMake configurations.
+# Install the final per-sample convolution-weight interpolation on the pinned
+# NAM core. The plugin uses a fixed linear 100/100 ms rate/ramp by default.
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 execute_process(
   COMMAND "${Python3_EXECUTABLE}"
@@ -87,7 +87,7 @@ execute_process(
   ERROR_VARIABLE PNAM_DIRECT_KERNEL_ERROR)
 if(NOT PNAM_DIRECT_KERNEL_RESULT EQUAL 0)
   message(FATAL_ERROR
-    "Experimental direct-kernel smoothing could not be installed: "
+    "Direct-kernel smoothing could not be installed: "
     "${PNAM_DIRECT_KERNEL_ERROR}")
 endif()
 message(STATUS "${PNAM_DIRECT_KERNEL_OUTPUT}")
