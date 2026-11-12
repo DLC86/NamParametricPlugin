@@ -76,7 +76,7 @@ jobs:
           assert release['tag_name'] == os.environ['RELEASE_TAG']
           assert release['target_commitish'] == revision, 'Release and binary source must match'
           PY
-          gh release upload "$RELEASE_TAG" dist/*.tar.gz
+          gh release upload "$RELEASE_TAG" dist/*.tar.gz --clobber
       - name: Preserve packages and runtime report
         if: always() && !inputs.upload_release
         uses: actions/upload-artifact@v4

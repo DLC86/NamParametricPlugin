@@ -1,4 +1,4 @@
-name: Draft 0.5.1 — Eco 20 ms limiter
+name: Draft 0.5.1 — verified linear 100/100 ms
 on:
   push:
     branches: [main]
@@ -14,56 +14,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Create v0.5.1 draft only, pinned to this exact source commit
+      - name: Retarget the existing 0.5.1 draft and tag to tested main source
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_NOTES: |
-            # NAM Parametric Plugin 0.5.1
-
-            This is a **draft release**. It remains unpublished for testing and review.
-
-            ## Eco de-click: bounded hypernetwork updates
-
-            - **20 ms minimum interval between weight recalculations** in Eco mode, measured using model-audio samples rather than wall time or the GUI timer.
-            - The first control change applies immediately. Additional knob/switch movements during the cooldown are coalesced: **only the latest complete parameter vector** is applied at the next eligible audio block.
-            - The existing 5 ms de-click correction remains enabled to suppress boundary transients. No added audio delay or lookahead is introduced.
-            - **Linear Volume stays independent**: sample-smoothed output attenuation does not trigger a hypernetwork update and is not rate-limited.
-            - **Crossfade is unchanged**: two-network 50 ms transitions continue to operate as before.
-            - Session restore, first load and Reset settle on the requested settings without waiting for a cooldown.
-
-            The throttle limits the **frequency** of recalculation, not the CPU cost of an individual reconditioning operation, which still occurs on the audio-processing thread. During rapid automation a requested setting may be applied up to approximately 20 ms plus one model processing block later. Audio quality should be evaluated with different models; the 5 ms de-click cannot guarantee artifact-free transitions for every nonlinear model.
-
-            ## Compatibility and other improvements
-
-            - The 0.5.0 changes remain included: ParametricSlimmableContainer Full/Lite, extended `index` UI ordering for neural controls and Linear Volume, corrected IR normalization, legacy PNAM support, calibration, session recall and static NAM exports.
-            - Neural parameters retain their original model-conditioning positions; only the **visual layout** follows optional `config.params[].index` metadata.
-            - Added deterministic tests of the 20 ms cooldown, latest-value retention, exact settled audio, existing Eco/Crossfade transitions, HyperA2 Full/Lite, and audio regression.
-
-            ## Native downloads
-
-            Seven native packages are built from **one exact source commit** after native checks:
-
-            - **Windows x64** — VST3 and Standalone
-            - **macOS universal (Apple Silicon / Intel)** — VST3, AU and Standalone
-            - **Linux x86_64** — VST3 and Standalone
-
-            Windows/macOS binaries are unsigned and not notarized. See the [README](https://github.com/DLC86/NamParametricPlugin#download).
-
-            This draft follows [v0.5.0](https://github.com/DLC86/NamParametricPlugin/releases/tag/v0.5.0). **Do not publish without explicit approval.**
         run: |
           set -euo pipefail
           grep -Fx "project(NamParametricPlugin VERSION 0.5.1)" CMakeLists.txt
-          if gh api "repos/$GH_REPO/git/ref/tags/v0.5.1" >/dev/null 2>&1; then
-            echo "Refusing to move an existing v0.5.1 tag" >&2
-            exit 1
-          fi
-          gh api -X POST "repos/$GH_REPO/git/refs" \
-            -f ref=refs/tags/v0.5.1 -f sha="$GITHUB_SHA" >/dev/null
-          gh release create v0.5.1 --verify-tag --draft --prerelease --latest=false \
-            --target "$GITHUB_SHA" --title "NAM Parametric Plugin 0.5.1" \
-            --notes "$RELEASE_NOTES"
-          echo "Created v0.5.1 draft for $GITHUB_SHA"
+          gh api "repos/$GH_REPO/releases/tags/v0.5.1" > /tmp/release.json
+          python3 - <<'PY'
+          import json
+          release=json.load(open('/tmp/release.json'))
+          assert release['tag_name']=='v0.5.1', 'Wrong release tag'
+          assert release['draft'], 'Refusing to update a published release'
+          assert release['prerelease'], 'Refusing to clear draft prerelease status'
+          print("Updating existing draft release",release['id'])
+          PY
+          # Update GitHub's existing lightweight release tag without creating
+          # an additional release. All seven packages will use GITHUB_SHA.
+          gh api -X PATCH "repos/$GH_REPO/git/refs/tags/v0.5.1" \
+            -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          release_id=$(python3 -c 'import json;print(json.load(open("/tmp/release.json"))["id"])')
+          gh api -X PATCH "repos/$GH_REPO/releases/$release_id" \
+            -f target_commitish="$GITHUB_SHA" \
+            -f body="$(cat docs/release-0.5.1.md)" \
+            -F draft=true -F prerelease=true >/dev/null
+          echo "Draft v0.5.1 retargeted to $GITHUB_SHA without publishing."
   build-macos:
     needs: prepare
     runs-on: macos-15-intel
@@ -115,7 +91,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release upload v0.5.1 dist/*.zip
+        run: gh release upload v0.5.1 dist/*.zip --clobber
 
   build-windows:
     needs: prepare
@@ -164,7 +140,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         shell: bash
-        run: gh release upload v0.5.1 dist/*.zip
+        run: gh release upload v0.5.1 dist/*.zip --clobber
 
   build-linux:
     needs: prepare
