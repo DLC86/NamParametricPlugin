@@ -40,6 +40,9 @@ jobs:
             artifact: macOS
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Use pinned Eigen GitHub mirror
+        shell: bash
+        run: git config --global url."https://github.com/eigenteam/eigen-git-mirror.git".insteadOf "https://gitlab.com/libeigen/eigen"
       - uses: actions/checkout@v4
         with:
           submodules: recursive
