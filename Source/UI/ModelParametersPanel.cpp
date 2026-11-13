@@ -22,7 +22,13 @@ constexpr int kLabelHeight = 18;
 constexpr int kSwitchHeight = 34;
 constexpr int kEmptyStateHeight = 60;
 
-juce::String FormatParamValue(const double value) { return juce::String(value, 2); }
+juce::String FormatParamValue(const double value, const double minValue,
+                              const double maxValue) {
+  const auto text = juce::String(value, 2);
+  return minValue < 0.0 && maxValue > 0.0 && value > 0.0
+             ? juce::String("+") + text
+             : text;
+}
 
 }  // namespace
 
@@ -125,7 +131,7 @@ void ModelParametersPanel::RebuildControls(const std::vector<RuntimeParameterInf
                                               juce::jlimit(minValue, maxValue, param.defaultValue));
 
       control.valueLabel = std::make_unique<juce::Label>();
-      control.valueLabel->setText(FormatParamValue(initialValue), juce::dontSendNotification);
+      control.valueLabel->setText(FormatParamValue(initialValue, minValue, maxValue), juce::dontSendNotification);
       control.valueLabel->setJustificationType(juce::Justification::centred);
       control.valueLabel->setFont(juce::Font(juce::FontOptions(13.5f)));
       control.valueLabel->setColour(juce::Label::textColourId, nam::ui::Colours::textTertiary);
@@ -133,7 +139,7 @@ void ModelParametersPanel::RebuildControls(const std::vector<RuntimeParameterInf
       auto* knob = control.knob.get();
       auto* valueLabel = control.valueLabel.get();
       control.knob->onValueChange = [this, knob, valueLabel, index]() {
-        valueLabel->setText(FormatParamValue(knob->getValue()), juce::dontSendNotification);
+        valueLabel->setText(FormatParamValue(knob->getValue(), knob->getMinimum(), knob->getMaximum()), juce::dontSendNotification);
         if (onValueChanged != nullptr) {
           onValueChanged(index, knob->getValue());
         }
@@ -166,7 +172,7 @@ void ModelParametersPanel::SetValue(const size_t index, const double value) {
              !juce::approximatelyEqual(control.knob->getValue(), value)) {
     control.knob->setValue(value, juce::dontSendNotification);
     if (control.valueLabel != nullptr) {
-      control.valueLabel->setText(FormatParamValue(value), juce::dontSendNotification);
+      control.valueLabel->setText(FormatParamValue(value, control.knob->getMinimum(), control.knob->getMaximum()), juce::dontSendNotification);
     }
   }
 }
