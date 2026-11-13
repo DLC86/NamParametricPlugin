@@ -315,13 +315,12 @@ void TestStaticOutputModeStability(const std::filesystem::path& directory) {
     if (size == ModelSize::Lite) {
       processor.SetModelSize(ModelSize::Lite);
       const auto deadline = juce::Time::getMillisecondCounterHiRes() + 30000;
-      while (processor.GetModelSize() != ModelSize::Lite) {
-        Check(juce::Time::getMillisecondCounterHiRes() < deadline, "Lite mode selection timed out");
+      // GetModelSize() changes immediately, before the asynchronous Lite
+      // network is available. Wait for the actual replacement to finish.
+      while (!processor.GetStatusText().endsWith(" (Lite)")) {
+        Check(juce::Time::getMillisecondCounterHiRes() < deadline, "Lite model load timed out");
         juce::MessageManager::getInstance()->runDispatchLoopUntil(10);
       }
-      // The desired size can be recorded while its asynchronous replacement
-      // is loading, so allow it to finish before the first render.
-      juce::MessageManager::getInstance()->runDispatchLoopUntil(200);
     }
     const auto setMode = [&](OutputMode value) {
       mode->setValueNotifyingHost(static_cast<float>(static_cast<int>(value)) / 3.0f);
