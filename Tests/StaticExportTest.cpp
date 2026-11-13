@@ -294,9 +294,17 @@ void TestStaticOutputModeStability(const std::filesystem::path& directory) {
   using namparametric::dsp::OutputMode;
   auto staticModel = NamModelEngine::BakeStaticModel(
       MakeA2(true), std::vector<float>{2.0f, 0.0f, 0.0f}, "CalibrationFixture.pnam");
-  // Static Full/Lite reads metadata from the selected child, not the container.
-  for (auto& branch : staticModel["config"]["submodels"])
-    branch["model"]["metadata"]["gear_type"] = "amp";
+  // Real-world SlimmableContainer layout: calibration and gear type are
+  // ONLY on the outer model. Lite/Full store their own loudness.
+  staticModel["metadata"]["gear_type"] = "amp";
+  staticModel["metadata"]["loudness"] = -20.0; // fallback, not the active loudness
+  for (size_t index = 0; index < 2; ++index) {
+    auto& metadata = staticModel["config"]["submodels"][index]["model"]["metadata"];
+    metadata.erase("input_level_dbu");
+    metadata.erase("output_level_dbu");
+    metadata.erase("gear_type");
+    metadata["loudness"] = index == 0 ? -24.0 : -22.0;
+  }
   const auto path = directory / "calibration_modes_static.nam";
   Write(path, staticModel);
 
@@ -329,7 +337,8 @@ void TestStaticOutputModeStability(const std::filesystem::path& directory) {
     const auto raw = RenderStaticProcessor(processor);
     setMode(OutputMode::Normalized);
     const auto normalized = RenderStaticProcessor(processor);
-    CheckOutputScale(raw, normalized, 6.0, "Static Normalized gain is incorrect");
+    CheckOutputScale(raw, normalized, size == ModelSize::Lite ? 6.0 : 4.0,
+                     "Static Normalized gain ignored selected child loudness");
     setMode(OutputMode::Calibrated);
     const auto calibrated = RenderStaticProcessor(processor);
     CheckOutputScale(raw, calibrated, -6.0, "Static Calibrated gain is incorrect");
@@ -337,9 +346,20 @@ void TestStaticOutputModeStability(const std::filesystem::path& directory) {
     CheckOutputScale(normalized, RenderStaticProcessor(processor), 0.0,
                      "Static Auto did not honor child gear_type");
 
-    // Bypass input drive compensation so changes in output level unambiguously
-    // identify a faulty OUTPUT trim, not a nonlinear model response.
+    // With calibration enabled, a different interface level must change the
+    // actual signal entering the neural network (not the output trim).
+    setMode(OutputMode::Raw);
+    calibrateInput->setValueNotifyingHost(1.0f);
+    const auto drivenAt12 = RenderStaticProcessor(processor);
     inputCalibration->setValueNotifyingHost(inputCalibration->convertTo0to1(24.0f));
+    const auto drivenAt24 = RenderStaticProcessor(processor);
+    double driveDelta = 0.0;
+    for (size_t i = 0; i < drivenAt12.size(); ++i)
+      driveDelta = std::max(driveDelta, std::abs(static_cast<double>(
+          drivenAt12[i] - drivenAt24[i])));
+    Check(driveDelta > 1.0e-5, "Input Calibration does not change static model drive");
+    // Disable drive compensation for the output-mode stability checks.
+    calibrateInput->setValueNotifyingHost(0.0f);
     setMode(OutputMode::Raw);
     CheckOutputScale(raw, RenderStaticProcessor(processor), 0.0,
                      "Input calibration changed Raw output with input calibration disabled");
@@ -355,6 +375,28 @@ void TestStaticOutputModeStability(const std::filesystem::path& directory) {
     setMode(OutputMode::Auto);
     CheckOutputScale(normalized, RenderStaticProcessor(processor), 2.0,
                      "Auto mode drifted after repeated mode changes");
+  }
+
+  // A missing child loudness must fall back to root metadata (and invalid
+  // child loudness must not mask a valid root value).
+  for (const bool invalid : {false, true}) {
+    auto fallback = staticModel;
+    auto& child = fallback["config"]["submodels"][0]["model"]["metadata"];
+    if (invalid) child["loudness"] = nullptr;
+    else child.erase("loudness");
+    const auto fallbackPath = directory / (invalid ? "fallback-invalid.nam" : "fallback-missing.nam");
+    Write(fallbackPath, fallback);
+    NamModelEngine engine;
+    std::string error;
+    Check(engine.LoadModel(fallbackPath.string(), error, ModelSize::Lite), error);
+    Check(std::abs(engine.GetOutputCalibrationGainDb(12.0,
+              namparametric::dsp::OutputMode::Normalized) - 2.0) < 1e-6,
+          "Missing/invalid child loudness did not fall back to outer metadata");
+    Check(std::abs(engine.GetInputCalibrationGainDb(24.0, true) - 6.0) < 1e-6,
+          "Static input calibration did not read outer input_level_dbu");
+    Check(std::abs(engine.GetOutputCalibrationGainDb(12.0,
+              namparametric::dsp::OutputMode::Calibrated) + 6.0) < 1e-6,
+          "Static output calibration did not read outer output_level_dbu");
   }
 }
 

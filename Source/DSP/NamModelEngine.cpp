@@ -326,6 +326,20 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
                          architecture == "ParametricSlimmableContainer";
     const bool staticA2 = IsStaticA2Container(config);
     const bool supportsSizeSelection = hyperA2 || staticA2;
+    // Input/output calibration and gear type belong to the outer model.
+    // Loudness alone may be specific to the selected Lite/Full branch.
+    const auto rootMetadata = config.value("metadata", nlohmann::json::object());
+    nlohmann::json branchMetadata = nlohmann::json::object();
+    if (supportsSizeSelection) {
+      const auto& entry = config.at("config").at("submodels").at(
+          size == ModelSize::Lite ? 0 : 1);
+      if (entry.contains("model") && entry["model"].is_object()) {
+        branchMetadata = entry["model"].value("metadata", nlohmann::json::object());
+      } else {
+        branchMetadata = entry.value("metadata", nlohmann::json::object());
+      }
+      if (!branchMetadata.is_object()) branchMetadata = nlohmann::json::object();
+    }
     std::shared_ptr<const nlohmann::json> exportSource;
     if (hyperA2 || config.at("architecture") == "HyperWaveNet")
       exportSource = std::make_shared<const nlohmann::json>(original);
@@ -336,6 +350,28 @@ bool NamModelEngine::LoadModel(const std::string& modelPath, std::string& errorM
       auto child = config.at("config").at("submodels")[size == ModelSize::Lite ? 0 : 1].at("model");
       nam::verify_config_version(config.at("version").get<std::string>());
       config = std::move(child);
+    }
+    if (supportsSizeSelection) {
+      if (!config.contains("metadata") || !config["metadata"].is_object())
+        config["metadata"] = nlohmann::json::object();
+      auto& effectiveMetadata = config["metadata"];
+      // Never inherit input/output calibration or gear_type from a child.
+      // For a missing/invalid child loudness, use the outer loudness.
+      for (const char* key : {"input_level_dbu", "output_level_dbu", "gear_type"}) {
+        effectiveMetadata.erase(key);
+        if (rootMetadata.is_object() && rootMetadata.contains(key))
+          effectiveMetadata[key] = rootMetadata[key];
+      }
+      const auto validLoudness = [](const nlohmann::json& metadata) {
+        return metadata.is_object() && metadata.contains("loudness") &&
+               metadata["loudness"].is_number() &&
+               std::isfinite(metadata["loudness"].get<double>());
+      };
+      effectiveMetadata.erase("loudness");
+      if (validLoudness(branchMetadata))
+        effectiveMetadata["loudness"] = branchMetadata["loudness"];
+      else if (validLoudness(rootMetadata))
+        effectiveMetadata["loudness"] = rootMetadata["loudness"];
     }
     auto loadedModel = nam::get_dsp(config);
     if (loadedModel == nullptr) {
