@@ -125,8 +125,9 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
     std::vector<float> pendingValues;
     uint64_t consumedVersion = 0;
     double outputCalibrationGainDb = 0.0;
+    double outputReferenceLevel = 12.0;
+    bool outputReferenceInitialized = false;
     int lastOutputMode = -1;
-    float lastOutputTrim = 0.0f;
   };
 
   struct RestoredRuntimeParameterValue {

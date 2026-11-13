@@ -222,14 +222,18 @@ void NamParametricPluginAudioProcessor::processBlock(juce::AudioBuffer<float>& b
         interfaceLevel, mCalibrateInputParam->load() >= 0.5f));
     auto& state = *mActiveProcessingState;
     const int outputMode = static_cast<int>(mOutputModeParam->load());
-    // NAM Oversampler::_SetOutputGain is called for model/output changes, not
-    // when InputCalibrationLevel changes. Keep the output reference separate
-    // so adjusting input calibration changes drive without a second output trim.
-    if (outputMode != state.lastOutputMode || outputGainDb != state.lastOutputTrim) {
+    // Capture the output reference once per loaded model. Input Calibration
+    // changes drive only, including after selecting another Output Mode or
+    // adjusting the manual Output Gain. The old code used the current input
+    // calibration on every mode/trim change and could introduce level jumps.
+    if (!state.outputReferenceInitialized) {
+      state.outputReferenceLevel = interfaceLevel;
+      state.outputReferenceInitialized = true;
+    }
+    if (outputMode != state.lastOutputMode) {
       state.outputCalibrationGainDb = state.model->GetOutputCalibrationGainDb(
-          interfaceLevel, static_cast<namparametric::dsp::OutputMode>(outputMode));
+          state.outputReferenceLevel, static_cast<namparametric::dsp::OutputMode>(outputMode));
       state.lastOutputMode = outputMode;
-      state.lastOutputTrim = outputGainDb;
     }
     outputGainDb += static_cast<float>(state.outputCalibrationGainDb);
   }

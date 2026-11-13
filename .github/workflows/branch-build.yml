@@ -7,6 +7,10 @@ on:
         required: false
         default: ""
         type: string
+      windows_only:
+        description: Build only Windows and retain test binaries as workflow artifacts
+        type: boolean
+        default: false
       linux_only:
         description: Build Linux only
         type: boolean
@@ -31,13 +35,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: windows-latest
-            preset: windows-release
-            artifact: Windows-x64
-          - os: macos-15-intel
-            preset: mac-release
-            artifact: macOS
+        # Test commits marked [windows-only] avoid macOS/Linux builds.
+        include: ${{ fromJSON((inputs.windows_only || contains(github.event.head_commit.message, '[windows-only]')) && '[{"os":"windows-latest","preset":"windows-release","artifact":"Windows-x64"}]' || '[{"os":"windows-latest","preset":"windows-release","artifact":"Windows-x64"},{"os":"macos-15-intel","preset":"mac-release","artifact":"macOS"}]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - name: Use pinned Eigen GitHub mirror
@@ -93,7 +92,7 @@ jobs:
             build/windows-release/NamParametricPlugin_artefacts/Release/VST3/**
           if-no-files-found: error
   build_linux:
-    if: ${{ !inputs.release_tag }}
+    if: ${{ !inputs.release_tag && !inputs.windows_only && !contains(github.event.head_commit.message, '[windows-only]') }}
     permissions:
       contents: write
     uses: ./.github/workflows/linux-build.yml

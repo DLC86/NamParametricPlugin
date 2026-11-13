@@ -61,9 +61,10 @@ reference of +6 dBu produces a -6 dB correction in Calibrated output mode.
 
 The update rules also match NAM Oversampler: changing Input calibration or
 Calibrate input updates the **input** gain only. It does not recompute the
-output correction at the same time. Calibrated/Auto output takes its reference
-when a model is activated or Output mode/Output level changes. This preserves
-the reference plugin's behavior, including when recalibrating a loaded model.
+output correction at the same time. Calibrated/Auto output captures the interface
+level once when a model becomes active; subsequent Output mode/Output level
+changes reuse this reference rather than coupling output trim to later input
+calibration changes. Loading another model captures a new reference.
 Raw and Normalized output corrections never depend on input calibration.
 Gear types are case-insensitive, and legacy `return_level`/`return_level_dbu`
 metadata is accepted when `output_level_dbu` is absent, as in NAM Oversampler.

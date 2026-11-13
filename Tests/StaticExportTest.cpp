@@ -244,6 +244,121 @@ void WaitForLoad(Processor& processor) {
   }
 }
 
+
+void WaitForStaticModel(Processor& processor) {
+  const auto deadline = juce::Time::getMillisecondCounterHiRes() + 30000;
+  while (!processor.HasModelLoaded()) {
+    Check(juce::Time::getMillisecondCounterHiRes() < deadline, "Static model load timed out");
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(10);
+  }
+}
+
+std::vector<float> RenderStaticProcessor(Processor& processor) {
+  constexpr int blockSize = 257;
+  constexpr int length = 8224;
+  processor.prepareToPlay(48000.0, blockSize);
+  std::vector<float> samples;
+  samples.reserve(length);
+  juce::MidiBuffer midi;
+  juce::AudioBuffer<float> buffer(2, blockSize);
+  for (int offset = 0; offset < length; offset += blockSize) {
+    buffer.clear();
+    auto* input = buffer.getWritePointer(0);
+    for (int i = 0; i < blockSize; ++i) {
+      const auto t = static_cast<double>(offset + i);
+      input[i] = static_cast<float>(0.10 * std::sin(t * 0.028) +
+                                    0.03 * std::cos(t * 0.13));
+    }
+    processor.processBlock(buffer, midi);
+    samples.insert(samples.end(), buffer.getReadPointer(0), buffer.getReadPointer(0) + blockSize);
+  }
+  return samples;
+}
+
+void CheckOutputScale(const std::vector<float>& reference, const std::vector<float>& actual,
+                      const double db, const char* message) {
+  Check(reference.size() == actual.size(), "Static rendering size mismatch");
+  const double multiplier = std::pow(10.0, db / 20.0);
+  double maxError = 0.0;
+  double maxSignal = 0.0;
+  for (size_t i = 0; i < actual.size(); ++i) {
+    const double expected = reference[i] * multiplier;
+    maxError = std::max(maxError, std::abs(static_cast<double>(actual[i]) - expected));
+    maxSignal = std::max(maxSignal, std::abs(expected));
+  }
+  Check(maxSignal > 1.0e-6, "Static calibration fixture produced silence");
+  Check(maxError < std::max(1.0e-6, maxSignal * 2.0e-4), message);
+}
+
+void TestStaticOutputModeStability(const std::filesystem::path& directory) {
+  using namparametric::dsp::OutputMode;
+  auto staticModel = NamModelEngine::BakeStaticModel(
+      MakeA2(true), std::vector<float>{2.0f, 0.0f, 0.0f}, "CalibrationFixture.pnam");
+  // Static Full/Lite reads metadata from the selected child, not the container.
+  for (auto& branch : staticModel["config"]["submodels"])
+    branch["model"]["metadata"]["gear_type"] = "amp";
+  const auto path = directory / "calibration_modes_static.nam";
+  Write(path, staticModel);
+
+  for (const auto size : {ModelSize::Full, ModelSize::Lite}) {
+    Processor processor;
+    processor.prepareToPlay(48000.0, 257);
+    auto* mode = processor.mValueTree.getParameter("outputMode");
+    auto* inputCalibration = processor.mValueTree.getParameter("inputCalibration");
+    auto* outputGain = processor.mValueTree.getParameter("outputGainDb");
+    auto* calibrateInput = processor.mValueTree.getParameter("calibrateInput");
+    Check(mode && inputCalibration && outputGain && calibrateInput, "Missing gain parameters");
+    calibrateInput->setValueNotifyingHost(0.0f);
+    inputCalibration->setValueNotifyingHost(inputCalibration->convertTo0to1(12.0f));
+    processor.LoadModelAsync(juce::File(juce::String(path.string())));
+    WaitForStaticModel(processor);
+    if (size == ModelSize::Lite) {
+      processor.SetModelSize(ModelSize::Lite);
+      const auto deadline = juce::Time::getMillisecondCounterHiRes() + 30000;
+      while (processor.GetModelSize() != ModelSize::Lite) {
+        Check(juce::Time::getMillisecondCounterHiRes() < deadline, "Lite mode selection timed out");
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(10);
+      }
+      // The desired size can be recorded while its asynchronous replacement
+      // is loading, so allow it to finish before the first render.
+      juce::MessageManager::getInstance()->runDispatchLoopUntil(200);
+    }
+    const auto setMode = [&](OutputMode value) {
+      mode->setValueNotifyingHost(static_cast<float>(static_cast<int>(value)) / 3.0f);
+    };
+    setMode(OutputMode::Raw);
+    const auto raw = RenderStaticProcessor(processor);
+    setMode(OutputMode::Normalized);
+    const auto normalized = RenderStaticProcessor(processor);
+    CheckOutputScale(raw, normalized, 6.0, "Static Normalized gain is incorrect");
+    setMode(OutputMode::Calibrated);
+    const auto calibrated = RenderStaticProcessor(processor);
+    CheckOutputScale(raw, calibrated, -6.0, "Static Calibrated gain is incorrect");
+    setMode(OutputMode::Auto);
+    CheckOutputScale(normalized, RenderStaticProcessor(processor), 0.0,
+                     "Static Auto did not honor child gear_type");
+
+    // Bypass input drive compensation so changes in output level unambiguously
+    // identify a faulty OUTPUT trim, not a nonlinear model response.
+    inputCalibration->setValueNotifyingHost(inputCalibration->convertTo0to1(24.0f));
+    setMode(OutputMode::Raw);
+    CheckOutputScale(raw, RenderStaticProcessor(processor), 0.0,
+                     "Input calibration changed Raw output with input calibration disabled");
+    setMode(OutputMode::Calibrated);
+    CheckOutputScale(calibrated, RenderStaticProcessor(processor), 0.0,
+                     "Switching to Calibrated reused the changed input calibration");
+    outputGain->setValueNotifyingHost(outputGain->convertTo0to1(2.0f));
+    CheckOutputScale(calibrated, RenderStaticProcessor(processor), 2.0,
+                     "Output Gain unexpectedly recalibrated the output reference");
+    setMode(OutputMode::Normalized);
+    CheckOutputScale(normalized, RenderStaticProcessor(processor), 2.0,
+                     "Normalized mode drifted after input calibration change");
+    setMode(OutputMode::Auto);
+    CheckOutputScale(normalized, RenderStaticProcessor(processor), 2.0,
+                     "Auto mode drifted after repeated mode changes");
+  }
+}
+
 void TestSnapshotAndFiles(const std::filesystem::path& directory) {
   Processor processor;
   Check(!processor.CanExportStaticModel() && !processor.CreateStaticExportSnapshot(),
@@ -335,6 +450,7 @@ int main(int argc, const char* const* argv) {
                                : std::filesystem::temp_directory_path() / "nam-static-export-test";
     std::filesystem::create_directories(directory);
     TestBaking(directory);
+    TestStaticOutputModeStability(directory);
     TestSnapshotAndFiles(directory);
     TestControlTransitions(directory, MakeHyper(3, false), MakeA2(false));
     std::cout << "All static NAM export tests passed\n";
