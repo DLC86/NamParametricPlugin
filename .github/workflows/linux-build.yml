@@ -61,8 +61,26 @@ jobs:
           tar -czf "dist/PNAM-Player-$version-Linux-x86_64-VST3.tar.gz" \
             -C "$root/VST3" 'PNAM Player.vst3'
           for package in dist/*.tar.gz; do tar -tzf "$package"; done
-      - name: Attach Linux packages to the matching release
-        if: inputs.upload_release
+      - name: Stage Linux packages on the unpublished 0.5.4 draft
+        if: inputs.upload_release && inputs.release_tag == 'v0.5.4'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GH_REPO/releases/444866237" --jq .draft)" = true
+          test "$(gh api "repos/$GH_REPO/releases/444866237" --jq .target_commitish)" = "$(git rev-parse HEAD)"
+          for package in dist/*.tar.gz; do
+            test -s "$package"
+            staged="$(basename "$package").staged-${GITHUB_SHA:0:12}"
+            curl --fail-with-body --silent --show-error --retry 3 \
+              --retry-delay 5 --retry-all-errors --max-time 900 \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$package" \
+              "https://uploads.github.com/repos/$GH_REPO/releases/444866237/assets?name=$staged" > /dev/null
+          done
+      - name: Attach packages to matching release for other tags
+        if: inputs.upload_release && inputs.release_tag != 'v0.5.4'
         run: |
           set -euo pipefail
           gh api "repos/$GH_REPO/releases" --paginate --slurp > "$RUNNER_TEMP/releases.json"

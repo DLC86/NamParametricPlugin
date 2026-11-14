@@ -26,38 +26,26 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          tag=v0.5.4
+          # Draft releases may use a temporary untagged-* name. Identify the
+          # existing unpublished release by ID, never by its display tag.
+          release_id=444866237
           grep -Fx 'project(NamParametricPlugin VERSION 0.5.4)' CMakeLists.txt
           test -s docs/release-0.5.4.md
-          # Tag and draft are linked to exactly the source SHA built below.
-          if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/tmp/tag.json 2>/dev/null; then
-            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$tag" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          gh api "repos/$GH_REPO/releases/$release_id" > /tmp/release.json
+          jq -e '.draft == true and .prerelease == true and
+                 .name == "PNAM Player 0.5.4" and
+                 (.tag_name == "v0.5.4" or (.tag_name | startswith("untagged-")))' /tmp/release.json
+          # Keep the version ref pointing to the exact source being compiled.
+          if gh api "repos/$GH_REPO/git/ref/tags/v0.5.4" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/v0.5.4" -f sha="$GITHUB_SHA" -F force=true >/dev/null
           else
-            gh api -X POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" >/dev/null
+            gh api -X POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/v0.5.4" -f sha="$GITHUB_SHA" >/dev/null
           fi
-          if gh release view "$tag" --json isDraft,tagName >/tmp/release.json 2>/dev/null; then
-            python3 - <<'PY'
-          import json
-          r = json.load(open('/tmp/release.json'))
-          assert r['isDraft'] and r['tagName'] == 'v0.5.4', 'Refusing to update a published release'
-          PY
-            gh api "repos/$GH_REPO/releases" --paginate --slurp > /tmp/releases.json
-            release_id=$(python3 - <<'PY'
-          import json
-          pages = json.load(open('/tmp/releases.json'))
-          found = [r for page in pages for r in page if r['tag_name'] == 'v0.5.4']
-          assert len(found) == 1 and found[0]['draft']
-          print(found[0]['id'])
-          PY
-            )
-            gh api -X PATCH "repos/$GH_REPO/releases/$release_id" \
-              -f target_commitish="$GITHUB_SHA" -f body="$(cat docs/release-0.5.4.md)" \
-              -F draft=true -F prerelease=true >/dev/null
-          else
-            gh release create "$tag" --verify-tag --draft --prerelease --latest=false \
-              --target "$GITHUB_SHA" --title 'PNAM Player 0.5.4' \
-              --notes-file docs/release-0.5.4.md
-          fi
+          gh api -X PATCH "repos/$GH_REPO/releases/$release_id" \
+            -f target_commitish="$GITHUB_SHA" -f body="$(cat docs/release-0.5.4.md)" \
+            -F draft=true -F prerelease=true > /tmp/release-updated.json
+          jq -e --arg sha "$GITHUB_SHA" '.draft == true and
+                   .target_commitish == $sha and .name == "PNAM Player 0.5.4"' /tmp/release-updated.json
 
   build-macos:
     needs: prepare
@@ -106,11 +94,25 @@ jobs:
             "${ARTEFACT_DIR}/AU/PNAM Player.component" \
             "dist/PNAM-Player-${VERSION}-macOS-AU.zip"
 
-      - name: Upload tested packages directly to draft
+      - name: Stage verified packages on the existing unpublished draft
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release upload v0.5.4 dist/*.zip --clobber
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GH_REPO/releases/444866237" --jq .draft)" = true
+          for package in dist/*.zip; do
+            test -s "$package"
+            staged="$(basename "$package").staged-${GITHUB_SHA:0:12}"
+            curl --fail-with-body --silent --show-error --retry 3 \
+              --retry-delay 5 --retry-all-errors --max-time 900 \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$package" \
+              "https://uploads.github.com/repos/$GH_REPO/releases/444866237/assets?name=$staged" > /dev/null
+          done
 
   build-windows:
     needs: prepare
@@ -154,12 +156,25 @@ jobs:
           Compress-Archive -Path "$artefactDir/VST3/PNAM Player.vst3" `
             -DestinationPath "dist/PNAM-Player-$version-Windows-VST3.zip"
 
-      - name: Upload tested packages directly to draft
+      - name: Stage verified packages on the existing unpublished draft
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         shell: bash
-        run: gh release upload v0.5.4 dist/*.zip --clobber
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GH_REPO/releases/444866237" --jq .draft)" = true
+          for package in dist/*.zip; do
+            test -s "$package"
+            staged="$(basename "$package").staged-${GITHUB_SHA:0:12}"
+            curl --fail-with-body --silent --show-error --retry 3 \
+              --retry-delay 5 --retry-all-errors --max-time 900 \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$package" \
+              "https://uploads.github.com/repos/$GH_REPO/releases/444866237/assets?name=$staged" > /dev/null
+          done
 
   build-linux:
     needs: prepare
@@ -173,26 +188,101 @@ jobs:
     needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     steps:
-      - name: Verify seven native packages and leave release unpublished
+      - name: Atomically replace all seven packages and keep release unpublished
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
         run: |
+          set -euo pipefail
           python3 - <<'PY'
-          import json, os, subprocess
-          pages = json.loads(subprocess.check_output([
-              'gh', 'api', f'repos/{os.environ["GH_REPO"]}/releases',
-              '--paginate', '--slurp']))
-          matches = [r for page in pages for r in page if r['tag_name'] == 'v0.5.4']
-          assert len(matches) == 1
-          r = matches[0]
-          assert r['draft'] and r['target_commitish'] == os.environ['GITHUB_SHA']
+          import json
+          import os
+          import re
+          import urllib.request
+
+          repo = os.environ['GH_REPO']
+          sha = os.environ['SOURCE_SHA']
+          token = os.environ['GH_TOKEN']
+          release_id = 444866237
           prefix = 'PNAM-Player-0.5.4-'
-          expected = {prefix + s for s in (
+          names = {prefix + suffix for suffix in (
               'Windows-Standalone.zip', 'Windows-VST3.zip',
               'macOS-Standalone.zip', 'macOS-VST3.zip', 'macOS-AU.zip',
               'Linux-x86_64-Standalone.tar.gz', 'Linux-x86_64-VST3.tar.gz')}
-          assert {a['name'] for a in r['assets']} == expected
-          assert all(a['state'] == 'uploaded' and a['size'] > 0 for a in r['assets'])
-          print('0.5.4: seven packages attached; release remains a draft.')
+          short = sha[:12]
+          base = f'https://api.github.com/repos/{repo}'
+          headers = {
+              'Authorization': f'Bearer {token}',
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+          }
+
+          def api(method, path, payload=None):
+              data = None if payload is None else json.dumps(payload).encode()
+              request_headers = dict(headers)
+              if data is not None:
+                  request_headers['Content-Type'] = 'application/json'
+              request = urllib.request.Request(
+                  base + path, method=method, data=data, headers=request_headers)
+              with urllib.request.urlopen(request, timeout=120) as response:
+                  return None if response.status == 204 else json.load(response)
+
+          release = api('GET', f'/releases/{release_id}')
+          assert release['draft'] and release['prerelease'], 'Refusing to modify a published release'
+          assert release['name'] == 'PNAM Player 0.5.4'
+          assert release['tag_name'] == 'v0.5.4' or release['tag_name'].startswith('untagged-')
+          assert release['target_commitish'] == sha, 'Release source SHA mismatch'
+          assert api('GET', '/git/ref/heads/main')['object']['sha'] == sha, 'Stale build'
+          assert api('GET', '/git/ref/tags/v0.5.4')['object']['sha'] == sha
+
+          assets = {a['name']: a for a in release['assets']}
+          staged_names = {name + '.staged-' + short for name in names}
+          staged = {name: assets[name + '.staged-' + short] for name in names}
+          existing = {name: assets[name] for name in names if name in assets}
+          stale = {name: a for name, a in assets.items()
+                   if name not in staged_names and name not in existing
+                   and any(name.startswith(pkg + '.staged-') and
+                           re.fullmatch(r'[0-9a-f]{12}', name[len(pkg + '.staged-'):])
+                           for pkg in names)}
+          assert set(assets) == set(existing) | staged_names | set(stale), (
+              'Unexpected draft assets: no replacement performed')
+          for name, asset in staged.items():
+              assert asset['state'] == 'uploaded' and asset['size'] > 0, name
+
+          def rename(asset, name):
+              return api('PATCH', f"/releases/assets/{asset['id']}", {'name': name})
+
+          def delete(asset):
+              api('DELETE', f"/releases/assets/{asset['id']}")
+
+          for name in sorted(names):
+              previous = existing.get(name)
+              if previous:
+                  rename(previous, name + '.backup-' + short)
+              try:
+                  rename(staged[name], name)
+              except Exception:
+                  if previous:
+                      rename(previous, name)
+                  raise
+              if previous:
+                  delete(previous)
+              print('Updated draft asset:', name, flush=True)
+
+          for name, asset in stale.items():
+              delete(asset)
+
+          verified = api('GET', f'/releases/{release_id}')
+          result = {a['name']: a for a in verified['assets']}
+          assert set(result) == names
+          assert verified['draft'] and verified['prerelease']
+          assert verified['target_commitish'] == sha
+          for name in names:
+              assert result[name]['id'] == staged[name]['id']
+              assert result[name]['state'] == 'uploaded'
+              assert result[name]['size'] == staged[name]['size']
+              if staged[name].get('digest'):
+                  assert result[name]['digest'] == staged[name]['digest']
+          print('SUCCESS: seven new 0.5.4 packages installed in unpublished draft.')
           PY
