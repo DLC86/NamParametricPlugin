@@ -1,0 +1,145 @@
+name: Draft 0.5.5
+
+on:
+  push:
+    tags:
+      - "v0.5.5"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-15-intel
+
+    steps:
+      - name: Use pinned Eigen GitHub mirror
+        shell: bash
+        run: git config --global url.https://github.com/eigenteam/eigen-git-mirror.git.insteadOf https://gitlab.com/libeigen/eigen
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Configure
+        run: cmake --preset mac-release -DNAM_PARAMETRIC_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build --preset mac-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_AU NamParametricPlugin_Standalone static_export_test hyper_a2_engine_test ir_normalization_test
+
+      - name: Verify audio, calibration and control smoothing
+        run: ctest --test-dir build/mac-release --output-on-failure -R '^(static_export|hyper_a2_engine|ir_normalization)$'
+
+      - name: Package artifacts
+        run: |
+          set -euo pipefail
+          ARTEFACT_DIR="build/mac-release/NamParametricPlugin_artefacts/Release"
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          for entry in Standalone/app VST3/vst3 AU/component; do
+            format="${entry%/*}"
+            extension="${entry#*/}"
+            lipo "${ARTEFACT_DIR}/$format/PNAM Player.$extension/Contents/MacOS/PNAM Player" -verify_arch arm64 x86_64
+          done
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${ARTEFACT_DIR}/Standalone/PNAM Player.app" \
+            "dist/PNAM-Player-${VERSION}-macOS-Standalone.zip"
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${ARTEFACT_DIR}/VST3/PNAM Player.vst3" \
+            "dist/PNAM-Player-${VERSION}-macOS-VST3.zip"
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${ARTEFACT_DIR}/AU/PNAM Player.component" \
+            "dist/PNAM-Player-${VERSION}-macOS-AU.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: draft-macos
+          path: dist/*.zip
+          if-no-files-found: error
+
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Use pinned Eigen GitHub mirror
+        shell: bash
+        run: git config --global url.https://github.com/eigenteam/eigen-git-mirror.git.insteadOf https://gitlab.com/libeigen/eigen
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Ninja
+        run: choco install ninja -y
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        run: cmake --preset windows-release -DNAM_PARAMETRIC_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build --preset windows-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_Standalone static_export_test hyper_a2_engine_test ir_normalization_test
+
+      - name: Verify audio, calibration and control smoothing
+        run: ctest --test-dir build/windows-release --output-on-failure -R '^(static_export|hyper_a2_engine|ir_normalization)$'
+
+      - name: Package artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $artefactDir = "build/windows-release/NamParametricPlugin_artefacts/Release"
+          $version = "${env:GITHUB_REF_NAME}".TrimStart("v")
+          $info = (Get-Item -LiteralPath "$artefactDir/Standalone/PNAM Player.exe").VersionInfo
+          if ($info.FileVersion -ne $version -or $info.ProductVersion -ne $version) { throw 'Binary version mismatch' }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          Compress-Archive -Path "$artefactDir/Standalone/PNAM Player.exe", "$artefactDir/Standalone/THIRD-PARTY-NOTICES.md", "$artefactDir/Standalone/CREDITS.md" `
+            -DestinationPath "dist/PNAM-Player-$version-Windows-Standalone.zip"
+
+          Compress-Archive -Path "$artefactDir/VST3/PNAM Player.vst3" `
+            -DestinationPath "dist/PNAM-Player-$version-Windows-VST3.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: draft-windows
+          path: dist/*.zip
+          if-no-files-found: error
+
+  build-linux:
+    uses: ./.github/workflows/linux-build.yml
+    with:
+      source_ref: ${{ github.ref }}
+
+  verify-draft:
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+      - name: Verify and attach seven packages to the unpublished release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          grep -Fx "project(NamParametricPlugin VERSION $version)" CMakeLists.txt
+          files=()
+          for suffix in Windows-Standalone.zip Windows-VST3.zip macOS-Standalone.zip macOS-VST3.zip macOS-AU.zip Linux-x86_64-Standalone.tar.gz Linux-x86_64-VST3.tar.gz; do
+            package="packages/PNAM-Player-$version-$suffix"
+            test -s "$package"
+            files+=("$package")
+          done
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" --verify-tag --draft --prerelease --latest=false \
+            --target "$GITHUB_SHA" --title "PNAM Player $version" --notes-file "docs/release-$version.md"
+          gh release view "$GITHUB_REF_NAME" --json isDraft,assets --jq 'if .isDraft and (.assets | length == 7) then . else error("Draft verification failed") end'

@@ -344,6 +344,9 @@ NamParametricPluginAudioProcessorEditor::NamParametricPluginAudioProcessorEditor
   mOutputAttachment = std::make_unique<SliderAttachment>(
       mProcessor.mValueTree, NamParametricPluginAudioProcessor::ParamIDs::outputGainDb,
       mTopBar.getOutputSlider());
+  mStereoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+      mProcessor.mValueTree, NamParametricPluginAudioProcessor::ParamIDs::stereo,
+      mTopBar.getStereoButton());
 
   UpdateRuntimeParameterControls();
   UpdateModelBarInfo();

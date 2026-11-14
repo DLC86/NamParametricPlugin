@@ -25,6 +25,7 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
     static constexpr const char* calibrateInput = "calibrateInput";
     static constexpr const char* inputCalibration = "inputCalibration";
     static constexpr const char* outputMode = "outputMode";
+    static constexpr const char* stereo = "stereo";
   };
 
   struct RuntimeParameterInfo {
@@ -121,6 +122,7 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
 
   struct ProcessingState {
     std::unique_ptr<namparametric::dsp::NamModelEngine> model;
+    std::unique_ptr<namparametric::dsp::NamModelEngine> rightModel;
     std::shared_ptr<RuntimeParameterMailbox> mailbox;
     std::vector<float> pendingValues;
     uint64_t consumedVersion = 0;
@@ -160,10 +162,18 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
     uint64_t requestId = 0;
   };
 
+  struct StereoIr {
+    namparametric::dsp::IrEngine left, right;
+    void Reset(double rate, int block) {
+      left.Reset(rate, block);
+      right.Reset(rate, block);
+    }
+  };
+
   struct IrAsyncLoadResult {
     bool success = false;
     uint64_t requestId = 0;
-    std::unique_ptr<namparametric::dsp::IrEngine> irEngine;
+    std::unique_ptr<StereoIr> irEngine;
     juce::String message;
     juce::String loadedPath;
   };
@@ -222,9 +232,9 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
   std::optional<IrLoadRequest> mQueuedIrLoadRequest;
   uint64_t mLatestIrLoadRequestId = 0;
   bool mIrClearStaged = false;
-  std::unique_ptr<namparametric::dsp::IrEngine> mActiveIr;
-  std::unique_ptr<namparametric::dsp::IrEngine> mStagedIr;
-  std::unique_ptr<namparametric::dsp::IrEngine> mRetiredIr;
+  std::unique_ptr<StereoIr> mActiveIr;
+  std::unique_ptr<StereoIr> mStagedIr;
+  std::unique_ptr<StereoIr> mRetiredIr;
   juce::String mIrStatusText = "No IR loaded";
   juce::String mIrPath;
 
@@ -236,6 +246,7 @@ class NamParametricPluginAudioProcessor final : public juce::AudioProcessor, pri
   std::atomic<float>* mCalibrateInputParam = nullptr;
   std::atomic<float>* mInputCalibrationParam = nullptr;
   std::atomic<float>* mOutputModeParam = nullptr;
+  std::atomic<float>* mStereoParam = nullptr;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NamParametricPluginAudioProcessor)
 };

@@ -73,6 +73,7 @@ class NamParametricPluginAudioProcessorEditor final : public juce::AudioProcesso
 
   std::unique_ptr<SliderAttachment> mInputAttachment;
   std::unique_ptr<SliderAttachment> mOutputAttachment;
+  std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> mStereoAttachment;
 
   std::vector<RuntimeParameterInfo> mLastRuntimeParameters;
 

@@ -11,8 +11,15 @@ class TopBarComponent final : public juce::Component {
 
   juce::Slider& getInputSlider() { return mInputKnob; }
   juce::Slider& getOutputSlider() { return mOutputKnob; }
+  juce::Button& getStereoButton() { return mStereo; }
 
  private:
+  class StereoButton final : public juce::Button {
+   public:
+    StereoButton();
+    void paintButton(juce::Graphics&, bool highlighted, bool down) override;
+  };
+  StereoButton mStereo;
   struct KnobColumn {
     juce::Label tag;
     juce::Slider knob{juce::Slider::RotaryVerticalDrag, juce::Slider::NoTextBox};

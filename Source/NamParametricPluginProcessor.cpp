@@ -145,7 +145,7 @@ bool NamParametricPluginAudioProcessor::RuntimeParameterMailbox::TryReadStable(
 
 NamParametricPluginAudioProcessor::NamParametricPluginAudioProcessor()
     : juce::AudioProcessor(BusesProperties()
-                               .withInput("Input", juce::AudioChannelSet::mono(), true)
+                               .withInput("Input", juce::AudioChannelSet::stereo(), true)
                                .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       mValueTree(*this, nullptr, "PARAMS", CreateParameterLayout()) {
   mInputGainParam = mValueTree.getRawParameterValue(ParamIDs::inputGainDb);
@@ -154,6 +154,7 @@ NamParametricPluginAudioProcessor::NamParametricPluginAudioProcessor()
   mCalibrateInputParam = mValueTree.getRawParameterValue(ParamIDs::calibrateInput);
   mInputCalibrationParam = mValueTree.getRawParameterValue(ParamIDs::inputCalibration);
   mOutputModeParam = mValueTree.getRawParameterValue(ParamIDs::outputMode);
+  mStereoParam = mValueTree.getRawParameterValue(ParamIDs::stereo);
   startTimerHz(30);
 }
 
@@ -175,9 +176,11 @@ void NamParametricPluginAudioProcessor::prepareToPlay(const double sampleRate,
     std::lock_guard<std::mutex> lock(mLoadMutex);
     if (mActiveProcessingState != nullptr) {
       mActiveProcessingState->model->Reset(sampleRate, preparedBlockSize);
+      mActiveProcessingState->rightModel->Reset(sampleRate, preparedBlockSize);
     }
     if (mStagedProcessingState != nullptr) {
       mStagedProcessingState->model->Reset(sampleRate, preparedBlockSize);
+      mStagedProcessingState->rightModel->Reset(sampleRate, preparedBlockSize);
     }
   }
 
@@ -195,7 +198,8 @@ void NamParametricPluginAudioProcessor::prepareToPlay(const double sampleRate,
 void NamParametricPluginAudioProcessor::releaseResources() {}
 
 bool NamParametricPluginAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const {
-  return layouts.getMainInputChannelSet() == juce::AudioChannelSet::mono() &&
+  const auto input = layouts.getMainInputChannelSet();
+  return (input == juce::AudioChannelSet::mono() || input == juce::AudioChannelSet::stereo()) &&
          layouts.getMainOutputChannelSet() == juce::AudioChannelSet::stereo();
 }
 
@@ -241,36 +245,43 @@ void NamParametricPluginAudioProcessor::processBlock(juce::AudioBuffer<float>& b
   const float outputGain = juce::Decibels::decibelsToGain(outputGainDb);
   const bool irEnabled = mIrEnabledParam != nullptr && mIrEnabledParam->load() >= 0.5f;
 
-  const float* input = buffer.getReadPointer(0);
   float* outputLeft = buffer.getWritePointer(0);
   float* outputRight = buffer.getNumChannels() > 1 ? buffer.getWritePointer(1) : nullptr;
+  const bool stereo = outputRight != nullptr && getTotalNumInputChannels() == 2 &&
+                      mStereoParam->load() >= 0.5f;
   const int chunkCapacity = static_cast<int>(mInputScratch.size());
 
+  const auto processChannel = [&](float* channel, auto* model, auto* ir) {
   for (int offset = 0; offset < numSamples; offset += chunkCapacity) {
     const int chunkSize = std::min(chunkCapacity, numSamples - offset);
     for (int i = 0; i < chunkSize; ++i) {
-      mInputScratch[static_cast<size_t>(i)] = input[offset + i] * inputGain;
+      mInputScratch[static_cast<size_t>(i)] = channel[offset + i] * inputGain;
     }
 
-    if (mActiveProcessingState != nullptr && mActiveProcessingState->model->IsLoaded()) {
-      mActiveProcessingState->model->Process(mInputScratch.data(), mOutputScratch.data(),
-                                             chunkSize);
+    if (model != nullptr && model->IsLoaded()) {
+      model->Process(mInputScratch.data(), mOutputScratch.data(), chunkSize);
     } else {
       std::copy_n(mInputScratch.data(), chunkSize, mOutputScratch.data());
     }
 
-    if (irEnabled && mActiveIr != nullptr && mActiveIr->IsLoaded()) {
-      mActiveIr->Process(mOutputScratch.data(), mIrOutputScratch.data(), chunkSize);
+    if (irEnabled && ir != nullptr && ir->IsLoaded()) {
+      ir->Process(mOutputScratch.data(), mIrOutputScratch.data(), chunkSize);
       std::swap(mOutputScratch, mIrOutputScratch);
     }
 
     for (int i = 0; i < chunkSize; ++i) {
-      const float sample = mOutputScratch[static_cast<size_t>(i)] * outputGain;
-      outputLeft[offset + i] = sample;
-      if (outputRight != nullptr) {
-        outputRight[offset + i] = sample;
-      }
+      channel[offset + i] = mOutputScratch[static_cast<size_t>(i)] * outputGain;
     }
+  }
+  };
+  auto* state = mActiveProcessingState.get();
+  processChannel(outputLeft, state ? state->model.get() : nullptr,
+                 mActiveIr ? &mActiveIr->left : nullptr);
+  if (stereo) {
+    processChannel(outputRight, state ? state->rightModel.get() : nullptr,
+                   mActiveIr ? &mActiveIr->right : nullptr);
+  } else if (outputRight != nullptr) {
+    std::copy_n(outputLeft, numSamples, outputRight);
   }
 }
 
@@ -300,6 +311,8 @@ NamParametricPluginAudioProcessor::CreateParameterLayout() {
   params.push_back(std::make_unique<juce::AudioParameterChoice>(
       juce::ParameterID(ParamIDs::outputMode, 1), "Output Mode",
       juce::StringArray{"Raw", "Normalized", "Calibrated", "Auto"}, 3));
+  params.push_back(std::make_unique<juce::AudioParameterBool>(
+      juce::ParameterID(ParamIDs::stereo, 2), "Stereo", false));
   return {params.begin(), params.end()};
 }
 
@@ -385,9 +398,11 @@ void NamParametricPluginAudioProcessor::BeginModelLoadLocked(LoadRequest request
     result.preserveRuntimeParameters = loadRequest.preserveRuntimeParameters;
     result.restoredValues = std::move(loadRequest.restoredValues);
     auto model = std::make_unique<namparametric::dsp::NamModelEngine>();
+    auto rightModel = std::make_unique<namparametric::dsp::NamModelEngine>();
 
     std::string error;
-    if (!model->LoadModel(modelPath, error, loadRequest.size)) {
+    if (!model->LoadModel(modelPath, error, loadRequest.size) ||
+        !rightModel->LoadModel(modelPath, error, loadRequest.size)) {
       result.message = "Failed to load model: " + juce::String(error);
       return result;
     }
@@ -404,6 +419,7 @@ void NamParametricPluginAudioProcessor::BeginModelLoadLocked(LoadRequest request
         continue;
       }
       model->Reset(sampleRate, blockSize);
+      rightModel->Reset(sampleRate, blockSize);
       if (generationBefore == hostConfig->generation.load(std::memory_order_acquire)) {
         break;
       }
@@ -414,6 +430,7 @@ void NamParametricPluginAudioProcessor::BeginModelLoadLocked(LoadRequest request
     processingState->mailbox =
         std::make_shared<RuntimeParameterMailbox>(processingState->pendingValues);
     processingState->model = std::move(model);
+    processingState->rightModel = std::move(rightModel);
 
     result.success = true;
     result.loadedPath = fullPath;
@@ -538,7 +555,8 @@ void NamParametricPluginAudioProcessor::ApplyRestoredValues(AsyncLoadResult& res
   // Settle the newly constructed network on its restored controls before handing
   // it to the audio thread. Otherwise its initial history still belongs to the
   // defaults, which is especially audible when switching A2 sizes.
-  if (result.processingState->model->SetParameterValues(values)) {
+  if (result.processingState->model->SetParameterValues(values) &&
+      result.processingState->rightModel->SetParameterValues(values)) {
     for (;;) {
       const auto generation = mHostProcessingConfig->generation.load(std::memory_order_acquire);
       if ((generation & 1ULL) != 0) continue;
@@ -547,6 +565,7 @@ void NamParametricPluginAudioProcessor::ApplyRestoredValues(AsyncLoadResult& res
                                   kMinimumModelResetBlockSize);
       if (generation != mHostProcessingConfig->generation.load(std::memory_order_acquire)) continue;
       result.processingState->model->Reset(rate, block);
+      result.processingState->rightModel->Reset(rate, block);
       if (generation == mHostProcessingConfig->generation.load(std::memory_order_acquire)) break;
     }
     result.processingState->mailbox->TryReadStable(values, result.processingState->consumedVersion);
@@ -610,7 +629,7 @@ void NamParametricPluginAudioProcessor::BeginIrLoadLocked(IrLoadRequest request)
       [irPath, fullPath, hostConfig, loadRequest = std::move(request)]() mutable {
         IrAsyncLoadResult result;
         result.requestId = loadRequest.requestId;
-        auto ir = std::make_unique<namparametric::dsp::IrEngine>();
+        auto ir = std::make_unique<StereoIr>();
 
         std::string error;
         double sampleRate = 48000.0;
@@ -628,7 +647,8 @@ void NamParametricPluginAudioProcessor::BeginIrLoadLocked(IrLoadRequest request)
           }
         }
 
-        if (!ir->LoadIr(irPath, sampleRate, error)) {
+        if (!ir->left.LoadIr(irPath, sampleRate, error) ||
+            !ir->right.LoadIr(irPath, sampleRate, error)) {
           result.message = "Failed to load IR: " + juce::String(error);
           return result;
         }
@@ -859,7 +879,8 @@ void NamParametricPluginAudioProcessor::ApplyPendingRuntimeParameterChanges() {
     return;
   }
 
-  if (mActiveProcessingState->model->SetParameterValues(mActiveProcessingState->pendingValues)) {
+  if (mActiveProcessingState->model->SetParameterValues(mActiveProcessingState->pendingValues) &&
+      mActiveProcessingState->rightModel->SetParameterValues(mActiveProcessingState->pendingValues)) {
     mActiveProcessingState->consumedVersion = version;
   }
 }
@@ -920,6 +941,12 @@ void NamParametricPluginAudioProcessor::setStateInformation(const void* data,
   for (const char* oldId : {"controlTransition", "ecoTimingPreset", "ecoInterpolationCurve"}) {
     auto oldParameter = tree.getChildWithProperty("id", oldId);
     if (oldParameter.isValid()) tree.removeChild(oldParameter, nullptr);
+  }
+  if (!tree.getChildWithProperty("id", ParamIDs::stereo).isValid()) {
+    juce::ValueTree stereoState("PARAM");
+    stereoState.setProperty("id", ParamIDs::stereo, nullptr);
+    stereoState.setProperty("value", 0.0f, nullptr);
+    tree.addChild(stereoState, -1, nullptr);
   }
   mValueTree.replaceState(tree);
   {

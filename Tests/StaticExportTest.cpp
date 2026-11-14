@@ -476,9 +476,40 @@ void TestSnapshotAndFiles(const std::filesystem::path& directory) {
 }
 }  // namespace
 
+static void TestChannelRouting() {
+  Processor processor;
+  auto layout = processor.getBusesLayout();
+  layout.inputBuses.set(0, juce::AudioChannelSet::stereo());
+  Check(processor.setBusesLayout(layout), "Stereo input layout rejected");
+  processor.prepareToPlay(48000.0, 17);
+  auto* stereo = processor.mValueTree.getParameter(Processor::ParamIDs::stereo);
+  juce::AudioBuffer<float> buffer(2, 40);
+  juce::MidiBuffer midi;
+  const auto render = [&](bool enabled, float right) {
+    stereo->setValueNotifyingHost(enabled ? 1.0f : 0.0f);
+    for (int i = 0; i < buffer.getNumSamples(); ++i) {
+      buffer.setSample(0, i, 0.25f);
+      buffer.setSample(1, i, -0.5f);
+    }
+    processor.processBlock(buffer, midi);
+    for (int i = 0; i < buffer.getNumSamples(); ++i)
+      Check(buffer.getSample(0, i) == 0.25f && buffer.getSample(1, i) == right,
+            "Invalid mono/stereo channel routing");
+  };
+  render(false, 0.25f);
+  render(true, -0.5f);
+  juce::MemoryBlock state;
+  processor.getStateInformation(state);
+  Processor restored;
+  restored.setStateInformation(state.getData(), static_cast<int>(state.getSize()));
+  Check(restored.mValueTree.getRawParameterValue(Processor::ParamIDs::stereo)->load() == 1.0f,
+        "Stereo selection was not restored");
+}
+
 int main(int argc, const char* const* argv) {
   try {
     juce::ScopedJuceInitialiser_GUI gui;
+    TestChannelRouting();
 #if JUCE_WINDOWS
     juce::AudioDeviceManager devices;
     bool asioAvailable = false;

@@ -12,6 +12,26 @@ constexpr int kColumnGap = 3;
 constexpr int kColumnVerticalPadding = 6;
 }  // namespace
 
+TopBarComponent::StereoButton::StereoButton() : juce::Button("Stereo") {
+  setClickingTogglesState(true);
+  setTooltip("Mono / Stereo");
+}
+
+void TopBarComponent::StereoButton::paintButton(juce::Graphics& g, bool highlighted,
+                                                bool down) {
+  auto bounds = getLocalBounds().toFloat().reduced(1.0f);
+  g.setColour(highlighted || down ? nam::ui::Colours::hairline : nam::ui::Colours::track);
+  g.fillRoundedRectangle(bounds, 5.0f);
+  g.setColour(getToggleState() ? nam::ui::Colours::accent : nam::ui::Colours::textSecondary);
+  auto circle = bounds.withSizeKeepingCentre(10.0f, 10.0f);
+  if (getToggleState()) {
+    g.drawEllipse(circle.translated(-3.5f, 0.0f), 1.5f);
+    g.drawEllipse(circle.translated(3.5f, 0.0f), 1.5f);
+  } else {
+    g.drawEllipse(circle, 1.5f);
+  }
+}
+
 void TopBarComponent::ConfigureTag(juce::Label& label, const juce::String& text) {
   label.setText(text, juce::dontSendNotification);
   label.setJustificationType(juce::Justification::centred);
@@ -44,6 +64,7 @@ TopBarComponent::TopBarComponent() {
   addAndMakeVisible(mOutput.tag);
   addAndMakeVisible(mOutput.knob);
   addAndMakeVisible(mOutput.value);
+  addAndMakeVisible(mStereo);
 
   mInput.knob.onValueChange = [this]() { UpdateValueLabel(mInput); };
   mOutput.knob.onValueChange = [this]() { UpdateValueLabel(mOutput); };
@@ -89,5 +110,7 @@ void TopBarComponent::resized() {
   auto bounds = getLocalBounds();
   LayoutColumn(bounds.removeFromLeft(kKnobColumnWidth), mInput);
   LayoutColumn(bounds.removeFromRight(kKnobColumnWidth), mOutput);
+  const auto output = mOutputKnob.getBounds();
+  mStereo.setBounds(output.getX() - 30, output.getCentreY() - 12, 26, 24);
   mTitleBounds = bounds.toFloat();
 }
