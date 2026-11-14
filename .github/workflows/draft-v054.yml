@@ -1,5 +1,7 @@
 name: Draft 0.5.4 — verified native packages
 
+# Rebuild 0.5.4 with centered 3-decimal Input Calibration and dark settings fields.
+
 on:
   workflow_dispatch:
   push:

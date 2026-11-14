@@ -24,11 +24,30 @@ CalibrationSettingsComponent::CalibrationSettingsComponent(
   // Text-only field. The host parameter retains its ID and automation.
   mInput.setEditable(true, true, false);
   mInput.setJustificationType(juce::Justification::centred);
-  mInput.setColour(juce::Label::backgroundColourId, nam::ui::Colours::track);
+  mInput.setFont(juce::Font(juce::FontOptions(14.0f)));
+  mInput.setColour(juce::Label::backgroundColourId, nam::ui::Colours::background);
   mInput.setColour(juce::Label::textColourId, nam::ui::Colours::textPrimary);
   mInput.setColour(juce::Label::outlineColourId, nam::ui::Colours::hairline);
-  mInput.setTooltip("Interface input calibration in dBu, up to 3 decimals");
+  mInput.setTooltip("Interface input calibration in dBu, displayed with 3 decimals");
+  // The editable Label swaps its text for a TextEditor on click. Match its
+  // justification, font and indents so the value does not jump sideways.
+  mInput.onEditorShow = [this]() {
+    if (auto* editor = mInput.getCurrentTextEditor()) {
+      editor->setJustification(juce::Justification::centred);
+      editor->setFont(mInput.getFont());
+      editor->setIndents(0, 0);
+      editor->setColour(juce::TextEditor::backgroundColourId,
+                        nam::ui::Colours::background);
+      editor->setColour(juce::TextEditor::textColourId,
+                        nam::ui::Colours::textPrimary);
+      editor->setColour(juce::TextEditor::outlineColourId,
+                        nam::ui::Colours::hairline);
+      editor->setColour(juce::TextEditor::focusedOutlineColourId,
+                        nam::ui::Colours::hairline);
+    }
+  };
   mOutput.addItemList({"Raw", "Normalized", "Calibrated", "Auto"}, 1);
+  mOutput.setColour(juce::ComboBox::backgroundColourId, nam::ui::Colours::background);
   for (auto* child : std::initializer_list<juce::Component*>{
       &mTitle, &mInputLabel, &mOutputLabel, &mHelp, &mEnabled, &mInput, &mOutput})
     addAndMakeVisible(child);
@@ -61,10 +80,7 @@ CalibrationSettingsComponent::CalibrationSettingsComponent(
 }
 
 void CalibrationSettingsComponent::DisplayInputCalibration(float value) {
-  auto digits = juce::String(value, 3);
-  if (digits.containsChar('.'))
-    digits = digits.trimCharactersAtEnd("0").trimCharactersAtEnd(".");
-  mInput.setText(digits + " dBu", juce::dontSendNotification);
+  mInput.setText(juce::String(value, 3) + " dBu", juce::dontSendNotification);
 }
 
 void CalibrationSettingsComponent::paint(juce::Graphics& g) {
