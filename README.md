@@ -1,4 +1,18 @@
-# NamParametricPlugin
+# PNAM Player
+
+**Version 0.5.4 (draft)** renames the plug-in to **PNAM Player** by
+**The Tone Scientist**, matching NAM Oversampler's DAW manufacturer grouping
+(manufacturer code `TTSc`, distinct plug-in code `PnPl`).
+The large title is entirely red, the version is shown underneath it, and
+the new-release LED appears next to the version. Input Calibration is now a
+text-only dBu field with up to three decimal places (0.001 dBu resolution);
+the automation parameter ID is unchanged.
+
+This version includes the NAM metadata fix: input/output calibration and gear
+type are read from the outer model; loudness follows the active Lite/Full
+submodel with fallback to outer loudness. **DAW migration notice:** the new
+plug-in/manufacturer codes and product name may cause existing sessions to
+treat PNAM Player as a separate plug-in. Keep backups of existing sessions.
 
 **Version 0.5.3** fixes macOS Standalone recording permission: the packaged
 `Info.plist` now declares why the standalone needs access to CoreAudio
@@ -23,7 +37,7 @@ the plugin's separate parametric core.
 
 The plugin now **silently checks for published updates** when the UI opens,
 outside the audio callback. When a newer version exists, a small red LED
-beside Settings blinks; clicking it opens the official GitHub release.
+beside the version blinks; clicking it opens the official GitHub release.
 No startup dialog, automatic download, update installation or audio-thread
 network activity. If offline or GitHub is unavailable, nothing is shown.
 

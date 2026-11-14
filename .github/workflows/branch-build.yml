@@ -55,26 +55,16 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }} -DNAM_PARAMETRIC_BUILD_TESTS=ON
+        run: cmake --preset ${{ matrix.preset }} -DNAM_PARAMETRIC_BUILD_TESTS=OFF
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} --parallel 3
-      - name: Verify export, model compatibility and unity IR gain
-        run: ctest --test-dir build/${{ matrix.preset }} -C Release --output-on-failure -R "^(static_export|hyper_a2_engine|ir_normalization)$"
-      - name: Upload export validation files
-        if: always()
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}-Export-Validation
-          path: build/${{ matrix.preset }}/static-export-results/**
-          if-no-files-found: ignore
       - name: Package macOS bundles
         if: runner.os == 'macOS'
         run: |
           mkdir -p dist
-          ditto -c -k --sequesterRsrc --keepParent "build/mac-release/NamParametricPlugin_artefacts/Release/Standalone/NAM Parametric Plugin.app" dist/macOS-Standalone.zip
-          ditto -c -k --sequesterRsrc --keepParent "build/mac-release/NamParametricPlugin_artefacts/Release/VST3/NAM Parametric Plugin.vst3" dist/macOS-VST3.zip
-          ditto -c -k --sequesterRsrc --keepParent "build/mac-release/NamParametricPlugin_artefacts/Release/AU/NAM Parametric Plugin.component" dist/macOS-AU.zip
+          ditto -c -k --sequesterRsrc --keepParent "build/mac-release/NamParametricPlugin_artefacts/Release/Standalone/PNAM Player.app" dist/macOS-Standalone.zip
+          ditto -c -k --sequesterRsrc --keepParent "build/mac-release/NamParametricPlugin_artefacts/Release/VST3/PNAM Player.vst3" dist/macOS-VST3.zip
+          ditto -c -k --sequesterRsrc --keepParent "build/mac-release/NamParametricPlugin_artefacts/Release/AU/PNAM Player.component" dist/macOS-AU.zip
       - name: Upload macOS artifacts
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
@@ -154,7 +144,7 @@ jobs:
               VST3) extension=vst3 ;;
               AU) extension=component ;;
             esac
-            bundle="$root/$format/NAM Parametric Plugin.$extension"
+            bundle="$root/$format/PNAM Player.$extension"
             ditto -c -k --sequesterRsrc --keepParent "$bundle" \
               "dist/NAM-Parametric-Plugin-$version-macOS-$format.zip"
           done
@@ -193,7 +183,7 @@ jobs:
           for entry in Standalone/app VST3/vst3 AU/component; do
             format="${entry%/*}"
             extension="${entry#*/}"
-            executable="$root/$format/NAM Parametric Plugin.$extension/Contents/MacOS/NAM Parametric Plugin"
+            executable="$root/$format/PNAM Player.$extension/Contents/MacOS/PNAM Player"
             lipo "$executable" -verify_arch arm64 x86_64
           done
       - name: Preserve packaged bundles

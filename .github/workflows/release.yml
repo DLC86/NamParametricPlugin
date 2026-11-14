@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   prepare:
+    if: github.ref != 'refs/tags/v0.5.4'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -1,0 +1,196 @@
+name: Draft 0.5.4 — verified native packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/draft-v054.yml'
+
+permissions:
+  contents: write
+concurrency:
+  group: draft-v054-native
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create draft for verified native packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag=v0.5.4
+          grep -Fx 'project(NamParametricPlugin VERSION 0.5.4)' CMakeLists.txt
+          test -s docs/release-0.5.4.md
+          # Tag and draft are linked to exactly the source SHA built below.
+          if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/tmp/tag.json 2>/dev/null; then
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$tag" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api -X POST "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+          if gh release view "$tag" --json isDraft,tagName >/tmp/release.json 2>/dev/null; then
+            python3 - <<'PY'
+          import json
+          r = json.load(open('/tmp/release.json'))
+          assert r['isDraft'] and r['tagName'] == 'v0.5.4', 'Refusing to update a published release'
+          PY
+            gh api "repos/$GH_REPO/releases" --paginate --slurp > /tmp/releases.json
+            release_id=$(python3 - <<'PY'
+          import json
+          pages = json.load(open('/tmp/releases.json'))
+          found = [r for page in pages for r in page if r['tag_name'] == 'v0.5.4']
+          assert len(found) == 1 and found[0]['draft']
+          print(found[0]['id'])
+          PY
+            )
+            gh api -X PATCH "repos/$GH_REPO/releases/$release_id" \
+              -f target_commitish="$GITHUB_SHA" -f body="$(cat docs/release-0.5.4.md)" \
+              -F draft=true -F prerelease=true >/dev/null
+          else
+            gh release create "$tag" --verify-tag --draft --prerelease --latest=false \
+              --target "$GITHUB_SHA" --title 'PNAM Player 0.5.4' \
+              --notes-file docs/release-0.5.4.md
+          fi
+
+  build-macos:
+    needs: prepare
+    runs-on: macos-15-intel
+
+    steps:
+      - name: Route pinned Eigen checkout through GitHub
+        shell: bash
+        run: git config --global url."https://github.com/eigenteam/eigen-git-mirror.git".insteadOf "https://gitlab.com/libeigen/eigen"
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Configure
+        run: cmake --preset mac-release -DNAM_PARAMETRIC_BUILD_TESTS=OFF
+
+      - name: Build
+        run: cmake --build --preset mac-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_AU NamParametricPlugin_Standalone
+
+
+      - name: Package artifacts
+        run: |
+          set -euo pipefail
+          ARTEFACT_DIR="build/mac-release/NamParametricPlugin_artefacts/Release"
+          VERSION="0.5.4"
+          mkdir -p dist
+          for entry in Standalone/app VST3/vst3 AU/component; do
+            format="${entry%/*}"
+            extension="${entry#*/}"
+            lipo "${ARTEFACT_DIR}/$format/PNAM Player.$extension/Contents/MacOS/PNAM Player" -verify_arch arm64 x86_64
+          done
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${ARTEFACT_DIR}/Standalone/PNAM Player.app" \
+            "dist/PNAM-Player-${VERSION}-macOS-Standalone.zip"
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${ARTEFACT_DIR}/VST3/PNAM Player.vst3" \
+            "dist/PNAM-Player-${VERSION}-macOS-VST3.zip"
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${ARTEFACT_DIR}/AU/PNAM Player.component" \
+            "dist/PNAM-Player-${VERSION}-macOS-AU.zip"
+
+      - name: Upload tested packages directly to draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload v0.5.4 dist/*.zip --clobber
+
+  build-windows:
+    needs: prepare
+    runs-on: windows-latest
+
+    steps:
+      - name: Route pinned Eigen checkout through GitHub
+        shell: bash
+        run: git config --global url."https://github.com/eigenteam/eigen-git-mirror.git".insteadOf "https://gitlab.com/libeigen/eigen"
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Ninja
+        run: choco install ninja -y
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        run: cmake --preset windows-release -DNAM_PARAMETRIC_BUILD_TESTS=OFF
+
+      - name: Build
+        run: cmake --build --preset windows-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_Standalone
+
+
+      - name: Package artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $artefactDir = "build/windows-release/NamParametricPlugin_artefacts/Release"
+          $version = "0.5.4"
+          $info = (Get-Item -LiteralPath "$artefactDir/Standalone/PNAM Player.exe").VersionInfo
+          if ($info.FileVersion -ne $version -or $info.ProductVersion -ne $version) { throw 'Binary version mismatch' }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+          Compress-Archive -Path "$artefactDir/Standalone/PNAM Player.exe", "$artefactDir/Standalone/THIRD-PARTY-NOTICES.md", "$artefactDir/Standalone/CREDITS.md" `
+            -DestinationPath "dist/PNAM-Player-$version-Windows-Standalone.zip"
+
+          Compress-Archive -Path "$artefactDir/VST3/PNAM Player.vst3" `
+            -DestinationPath "dist/PNAM-Player-$version-Windows-VST3.zip"
+
+      - name: Upload tested packages directly to draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: gh release upload v0.5.4 dist/*.zip --clobber
+
+  build-linux:
+    needs: prepare
+    uses: ./.github/workflows/linux-build.yml
+    with:
+      source_ref: ${{ github.sha }}
+      release_tag: v0.5.4
+      upload_release: true
+
+  verify-draft:
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify seven native packages and leave release unpublished
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          pages = json.loads(subprocess.check_output([
+              'gh', 'api', f'repos/{os.environ["GH_REPO"]}/releases',
+              '--paginate', '--slurp']))
+          matches = [r for page in pages for r in page if r['tag_name'] == 'v0.5.4']
+          assert len(matches) == 1
+          r = matches[0]
+          assert r['draft'] and r['target_commitish'] == os.environ['GITHUB_SHA']
+          prefix = 'PNAM-Player-0.5.4-'
+          expected = {prefix + s for s in (
+              'Windows-Standalone.zip', 'Windows-VST3.zip',
+              'macOS-Standalone.zip', 'macOS-VST3.zip', 'macOS-AU.zip',
+              'Linux-x86_64-Standalone.tar.gz', 'Linux-x86_64-VST3.tar.gz')}
+          assert {a['name'] for a in r['assets']} == expected
+          assert all(a['state'] == 'uploaded' and a['size'] > 0 for a in r['assets'])
+          print('0.5.4: seven packages attached; release remains a draft.')
+          PY

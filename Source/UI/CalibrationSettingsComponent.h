@@ -9,11 +9,12 @@ class CalibrationSettingsComponent final : public juce::Component {
   void resized() override;
 
  private:
+  void DisplayInputCalibration(float value);
   juce::Label mTitle, mInputLabel, mOutputLabel, mHelp;
   juce::ToggleButton mEnabled{"Calibrate input"};
-  juce::Slider mInput{juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight};
+  juce::Label mInput;
   juce::ComboBox mOutput;
   std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> mEnabledAttachment;
-  std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mInputAttachment;
+  std::unique_ptr<juce::ParameterAttachment> mInputAttachment;
   std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> mOutputAttachment;
 };

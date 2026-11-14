@@ -1,6 +1,7 @@
 #include "TopBarComponent.h"
 
 #include "NamColours.h"
+#include <JuceHeader.h> // ProjectInfo::versionString
 
 namespace {
 constexpr int kKnobColumnWidth = 108;
@@ -62,12 +63,16 @@ void TopBarComponent::paint(juce::Graphics& g) {
   g.setColour(nam::ui::Colours::hairline);
   g.fillRect(getLocalBounds().removeFromBottom(1));
 
-  juce::AttributedString title;
-  title.setJustification(juce::Justification::centred);
-  const auto titleFont = juce::Font(juce::FontOptions(32.0f, juce::Font::bold));
-  title.append("Parametric ", titleFont, nam::ui::Colours::textPrimary);
-  title.append("NAM", titleFont, nam::ui::Colours::accent);
-  title.draw(g, mTitleBounds);
+  auto area = mTitleBounds.toNearestInt();
+  auto title = area.removeFromTop(74);
+  g.setColour(nam::ui::Colours::accent);
+  g.setFont(juce::Font(juce::FontOptions(32.0f, juce::Font::bold)));
+  g.drawFittedText("PNAM Player", title.withTrimmedTop(12),
+                   juce::Justification::centred, 1);
+  g.setColour(nam::ui::Colours::textSecondary);
+  g.setFont(juce::Font(juce::FontOptions(14.0f)));
+  g.drawText("v" + juce::String(ProjectInfo::versionString),
+             area.removeFromTop(22), juce::Justification::centred);
 }
 
 void TopBarComponent::LayoutColumn(juce::Rectangle<int> column, KnobColumn& knobColumn) {

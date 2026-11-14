@@ -92,12 +92,9 @@ void AboutOverlayComponent::paint(juce::Graphics& g) {
   g.setColour(juce::Colour(0xff333333));
   g.drawRoundedRectangle(mCardBounds.toFloat().reduced(0.5f), 8.0f, 1.0f);
 
-  juce::AttributedString title;
-  title.setJustification(juce::Justification::centredLeft);
-  const auto titleFont = juce::Font(juce::FontOptions(20.0f, juce::Font::bold));
-  title.append("Parametric ", titleFont, nam::ui::Colours::textPrimary);
-  title.append("NAM", titleFont, nam::ui::Colours::accent);
-  title.draw(g, mTitleBounds.toFloat());
+  g.setColour(nam::ui::Colours::accent);
+  g.setFont(juce::Font(juce::FontOptions(20.0f, juce::Font::bold)));
+  g.drawText("PNAM Player", mTitleBounds, juce::Justification::centredLeft);
 
   g.setColour(nam::ui::Colours::textSecondary);
   g.setFont(juce::Font(juce::FontOptions(13.0f)));
@@ -106,7 +103,7 @@ void AboutOverlayComponent::paint(juce::Graphics& g) {
 
   g.setColour(nam::ui::Colours::textSecondary);
   g.setFont(juce::Font(juce::FontOptions(14.0f)));
-  g.drawText(juce::CharPointer_UTF8("\xc2\xa9 2026 Phillip Self"), mCopyrightBounds,
+  g.drawText("The Tone Scientist (based on Phillip Self's work)", mCopyrightBounds,
              juce::Justification::centredLeft);
 
   g.setColour(nam::ui::Colours::hairline);

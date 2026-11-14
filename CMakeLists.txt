@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(NamParametricPlugin VERSION 0.5.3)
+project(NamParametricPlugin VERSION 0.5.4)
 
 include(CTest)
 
@@ -169,19 +169,19 @@ else()
 endif()
 
 juce_add_plugin(${TARGET_NAME}
-  COMPANY_NAME "phillipmself"
-  PRODUCT_NAME "NAM Parametric Plugin"
+  COMPANY_NAME "The Tone Scientist"
+  PRODUCT_NAME "PNAM Player"
   # macOS standalone uses CoreAudio input and must provide this Info.plist
   # privacy usage declaration. Without NSMicrophoneUsageDescription, TCC may
   # refuse the Studio 26c (and other physical audio input devices).
   # Preserve JUCE's intentional startup mute / feedback warning: users
   # explicitly unmute via the standalone Audio/MIDI Settings.
   MICROPHONE_PERMISSION_ENABLED TRUE
-  MICROPHONE_PERMISSION_TEXT "NAM Parametric Plugin needs access to audio inputs to process instruments through your audio interface."
+  MICROPHONE_PERMISSION_TEXT "PNAM Player needs access to audio inputs to process instruments through your audio interface."
   ICON_BIG "${CMAKE_CURRENT_LIST_DIR}/Resources/TTSLogo.png"
   ICON_SMALL "${CMAKE_CURRENT_LIST_DIR}/Resources/TTSLogo.png"
-  PLUGIN_MANUFACTURER_CODE PmSf
-  PLUGIN_CODE NpPg
+  PLUGIN_MANUFACTURER_CODE TTSc
+  PLUGIN_CODE PnPl
   IS_SYNTH FALSE
   NEEDS_MIDI_INPUT FALSE
   NEEDS_MIDI_OUTPUT FALSE

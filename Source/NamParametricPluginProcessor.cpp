@@ -295,7 +295,7 @@ NamParametricPluginAudioProcessor::CreateParameterLayout() {
       juce::ParameterID(ParamIDs::calibrateInput, 1), "Calibrate Input", true));
   params.push_back(std::make_unique<juce::AudioParameterFloat>(
       juce::ParameterID(ParamIDs::inputCalibration, 1), "Input Calibration",
-      juce::NormalisableRange<float>(-60.0f, 60.0f, 0.1f), 12.0f,
+      juce::NormalisableRange<float>(-60.0f, 60.0f, 0.001f), 12.0f,
       juce::AudioParameterFloatAttributes().withLabel("dBu")));
   params.push_back(std::make_unique<juce::AudioParameterChoice>(
       juce::ParameterID(ParamIDs::outputMode, 1), "Output Mode",

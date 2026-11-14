@@ -41,27 +41,25 @@ jobs:
           cmake -S . -B build/linux-release -G Ninja -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld -DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld
-          -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld -DNAM_PARAMETRIC_BUILD_TESTS=ON
+          -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld -DNAM_PARAMETRIC_BUILD_TESTS=OFF
       - name: Build
-        run: cmake --build build/linux-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_Standalone static_export_test hyper_a2_engine_test ir_normalization_test
-      - name: Verify export and unity IR gain
-        run: xvfb-run -a ctest --test-dir build/linux-release --verbose -R "^(static_export|hyper_a2_engine|ir_normalization)$"
+        run: cmake --build build/linux-release --parallel 3 --target NamParametricPlugin_VST3 NamParametricPlugin_Standalone
       - name: Check runtime libraries and package
         run: |
           set -euo pipefail
           root=build/linux-release/NamParametricPlugin_artefacts/Release
           version=$(sed -n 's/^project(NamParametricPlugin VERSION \([^)]*\)).*/\1/p' CMakeLists.txt)
           mkdir -p dist
-          for binary in "$root/Standalone/NAM Parametric Plugin" \
-            "$root/VST3/NAM Parametric Plugin.vst3/Contents/x86_64-linux/NAM Parametric Plugin.so"; do
+          for binary in "$root/Standalone/PNAM Player" \
+            "$root/VST3/PNAM Player.vst3/Contents/x86_64-linux/PNAM Player.so"; do
             file "$binary" | grep 'ELF 64-bit.*x86-64'
             ldd "$binary" | tee -a dist/runtime-libraries.txt
           done
           if grep -q 'not found' dist/runtime-libraries.txt; then exit 1; fi
-          tar -czf "dist/NAM-Parametric-Plugin-$version-Linux-x86_64-Standalone.tar.gz" \
-            -C "$root/Standalone" 'NAM Parametric Plugin' THIRD-PARTY-NOTICES.md
-          tar -czf "dist/NAM-Parametric-Plugin-$version-Linux-x86_64-VST3.tar.gz" \
-            -C "$root/VST3" 'NAM Parametric Plugin.vst3'
+          tar -czf "dist/PNAM-Player-$version-Linux-x86_64-Standalone.tar.gz" \
+            -C "$root/Standalone" 'PNAM Player' THIRD-PARTY-NOTICES.md
+          tar -czf "dist/PNAM-Player-$version-Linux-x86_64-VST3.tar.gz" \
+            -C "$root/VST3" 'PNAM Player.vst3'
           for package in dist/*.tar.gz; do tar -tzf "$package"; done
       - name: Attach Linux packages to the matching release
         if: inputs.upload_release

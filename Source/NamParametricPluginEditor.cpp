@@ -50,7 +50,7 @@ NamParametricPluginAudioProcessorEditor::CheckLatestRelease() {
     const juce::URL url(kReleaseApi);
     auto options = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
                        .withConnectionTimeoutMs(3500)
-                       .withExtraHeaders("User-Agent: NAM-Parametric-Plugin/" +
+                       .withExtraHeaders("User-Agent: PNAM-Player/" +
                                          juce::String(ProjectInfo::versionString) +
                                          "\r\nAccept: application/vnd.github+json\r\n");
     auto stream = url.createInputStream(options);
@@ -87,7 +87,7 @@ void NamParametricPluginAudioProcessorEditor::UpdateVersionNotification() {
     mNewVersion = mVersionCheck->get();
     mVersionCheck.reset();
     if (mNewVersion) {
-      mUpdateLed.setTooltip("NAM Parametric Plugin " + mNewVersion->version +
+      mUpdateLed.setTooltip("PNAM Player " + mNewVersion->version +
                             " available — click to view the release");
       mUpdateLed.setVisible(true);
     }
@@ -302,7 +302,7 @@ NamParametricPluginAudioProcessorEditor::NamParametricPluginAudioProcessorEditor
   mUpdateLed.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
   mUpdateLed.setColour(juce::TextButton::buttonOnColourId, juce::Colours::transparentBlack);
   mUpdateLed.setColour(juce::TextButton::textColourOffId, juce::Colour(0xffef4444));
-  mUpdateLed.setTooltip("Check for newer NAM Parametric Plugin versions");
+  mUpdateLed.setTooltip("Check for newer PNAM Player versions");
   mUpdateLed.onClick = [this]() {
     if (mNewVersion)
       juce::URL(mNewVersion->releaseUrl).launchInDefaultBrowser();
@@ -384,10 +384,11 @@ void NamParametricPluginAudioProcessorEditor::resized() {
                          kAboutButtonSize);
   mAboutOverlay.setBounds(getLocalBounds());
   mSettingsButton.setBounds(mAboutButton.getX() - 72, mAboutButton.getY(), 64, kAboutButtonSize);
-  // Keep the update indicator immediately to the right of the centred brand title.
-  const auto titleFont = juce::Font(juce::FontOptions(32.0f, juce::Font::bold));
-  const int titleRight = (getWidth() + titleFont.getStringWidth("Parametric NAM")) / 2;
-  mUpdateLed.setBounds(titleRight + 4, (kTopBarHeight - kUpdateLedSize) / 2,
+  // The update LED is aligned with the version below the centred red title.
+  const auto versionText = "v" + juce::String(ProjectInfo::versionString);
+  const auto versionFont = juce::Font(juce::FontOptions(14.0f));
+  const int right = (getWidth() + versionFont.getStringWidth(versionText)) / 2;
+  mUpdateLed.setBounds(right + 6, 74 + (22 - kUpdateLedSize) / 2,
                        kUpdateLedSize, kUpdateLedSize);
 }
 
